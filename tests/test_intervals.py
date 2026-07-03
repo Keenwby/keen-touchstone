@@ -90,6 +90,24 @@ def test_bootstrap_small_sample_warning() -> None:
     assert bootstrap_ci_curve(_suite(3, n_tasks=12), ks=[1], seed=0).small_sample_warning is False
 
 
+def test_degenerate_bootstrap_is_widened_not_certain() -> None:
+    """All per-task estimates identical (here: all zero) would give a [0, 0]
+    'CI' — a false claim of certainty. The guard widens with posterior draws."""
+    tasks = [TaskTrials(f"t{i}", 10, 0) for i in range(6)]
+    band = bootstrap_ci_curve(tasks, ks=[1, 2], seed=1)
+    assert band.widened_ks == (1, 2)
+    for k in (1, 2):
+        ci = band.intervals[k]
+        assert ci.high > ci.low  # no longer zero width
+        assert ci.high > 0.0  # admits the estimand may be positive
+        assert ci.high < 0.35  # but stays anchored to the data (0/10 x 6 tasks)
+
+
+def test_nondegenerate_bootstrap_untouched() -> None:
+    band = bootstrap_ci_curve(_suite(1), ks=[1, 2, 3], seed=42)
+    assert band.widened_ks == ()
+
+
 def test_bootstrap_rejects_k_beyond_common_range() -> None:
     tasks = [TaskTrials("a", 4, 3), TaskTrials("b", 9, 9)]
     with pytest.raises(ValueError, match="min"):

@@ -76,6 +76,11 @@ class CurveCI:
     small_sample_warning: bool
     seed: int | None
     n_resamples: int
+    widened_ks: tuple[int, ...] = ()
+    """k values where the plain bootstrap degenerated to zero width (every
+    per-task estimate identical — typical at k near n, where the UMVUE
+    collapses to {0,1}) and the interval was widened with Beta-posterior
+    draws. A zero-width CI from resampling is never a credible claim."""
 
 
 def bootstrap_ci_curve(
@@ -113,6 +118,24 @@ def bootstrap_ci_curve(
     lo_q, hi_q = (0.5 - level / 2) * 100, (0.5 + level / 2) * 100
     lows, highs = np.percentile(replicate_means, [lo_q, hi_q], axis=1)
 
+    # Degeneracy guard: if every replicate is identical at some k (typical at
+    # k near n where the UMVUE collapses to {0,1}), the percentile interval
+    # has zero width — a false claim of certainty. Widen (never narrow) with a
+    # posterior bootstrap: same task resamples, p_i drawn from each task's
+    # Jeffreys Beta posterior, replicate mean of p_i^k.
+    widened: list[int] = []
+    degenerate = [i for i, (lo, hi) in enumerate(zip(lows, highs, strict=True)) if lo == hi]
+    if degenerate:
+        alpha_post = np.array([t.c + JEFFREYS_PRIOR[0] for t in tasks])
+        beta_post = np.array([t.n - t.c + JEFFREYS_PRIOR[1] for t in tasks])
+        p_draws = rng.beta(alpha_post[idx], beta_post[idx])  # (B, T)
+        for i in degenerate:
+            k = ks[i]
+            bayes_means = (p_draws**k).mean(axis=1)
+            b_lo, b_hi = np.percentile(bayes_means, [lo_q, hi_q])
+            lows[i], highs[i] = min(lows[i], b_lo), max(highs[i], b_hi)
+            widened.append(k)
+
     intervals = {
         k: Interval(float(lo), float(hi), "bootstrap", level)
         for k, lo, hi in zip(ks, lows, highs, strict=True)
@@ -123,6 +146,7 @@ def bootstrap_ci_curve(
         small_sample_warning=n_tasks < SMALL_SAMPLE_TASKS,
         seed=seed,
         n_resamples=n_resamples,
+        widened_ks=tuple(widened),
     )
 
 

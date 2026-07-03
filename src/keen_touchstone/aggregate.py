@@ -98,6 +98,12 @@ def build_suite_result(
             "only 1 trial per task on at least one task: pass^k beyond k=1 is not estimable — "
             "rerun with more epochs/trials to get a decay curve"
         )
+    if band.widened_ks:
+        warnings.append(
+            f"bootstrap CI degenerated to zero width at k={list(band.widened_ks)} (per-task "
+            "estimator saturates near k=n); those intervals were widened with Beta-posterior "
+            "draws rather than reported as false certainty"
+        )
 
     decomp = variance_decomposition(tasks)
     curve_models = [
