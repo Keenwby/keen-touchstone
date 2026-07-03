@@ -31,19 +31,35 @@ def test_suite_and_tasks_validate_against_schema() -> None:
         jsonschema.validate(agg.to_schema_dict(), schema)  # raises on violation
 
 
-def test_suite_headline_matches_last_curve_point() -> None:
+def test_suite_headline_matches_its_curve_point() -> None:
     result = build_suite_result(
         _tasks(), context="offline", model="m", agent_config_hash="h", seed=7
     )
     suite = result.suite
-    last = suite.reliability_decay_curve[-1]
-    assert suite.headline_k == last.k == 10  # min(n_i)
-    assert suite.pass_hat_k == pytest.approx(last.pass_hat_k)
-    assert suite.pass_hat_k_ci_low == pytest.approx(last.ci_low)
-    assert suite.pass_hat_k_ci_high == pytest.approx(last.ci_high)
+    # curve runs the full k=1..min(n_i)=10; headline defaults to ceil(10/2)=5
+    # (near k=n the per-task estimator degenerates to {0,1})
+    assert len(suite.reliability_decay_curve) == 10
+    assert suite.headline_k == 5
+    at_headline = suite.reliability_decay_curve[4]
+    assert at_headline.k == 5
+    assert suite.pass_hat_k == pytest.approx(at_headline.pass_hat_k)
+    assert suite.pass_hat_k_ci_low == pytest.approx(at_headline.ci_low)
+    assert suite.pass_hat_k_ci_high == pytest.approx(at_headline.ci_high)
     assert suite.task_key == SUITE_TASK_KEY
     assert suite.n_rollouts == 80
     assert suite.token_mean is not None
+
+
+def test_explicit_headline_k_and_clamping() -> None:
+    result = build_suite_result(
+        _tasks(), context="offline", model="m", agent_config_hash="h", headline_k=8
+    )
+    assert result.suite.headline_k == 8
+    clamped = build_suite_result(
+        _tasks(), context="offline", model="m", agent_config_hash="h", headline_k=99
+    )
+    assert clamped.suite.headline_k == 10
+    assert any("clamped" in w for w in clamped.warnings)
 
 
 def test_task_key_source_omitted_when_none() -> None:
@@ -81,12 +97,12 @@ def test_warnings_for_small_suites_and_single_trials() -> None:
     assert any("more epochs" in w for w in single_trial.warnings)
 
 
-def test_k_max_narrows_headline() -> None:
+def test_k_max_narrows_curve_and_headline() -> None:
     result = build_suite_result(
         _tasks(6, n=12), context="offline", model="m", agent_config_hash="h", k_max=4
     )
-    assert result.suite.headline_k == 4
     assert len(result.suite.reliability_decay_curve) == 4
+    assert result.suite.headline_k == 2  # ceil(4/2)
 
 
 def test_pydantic_forbids_extras_too() -> None:

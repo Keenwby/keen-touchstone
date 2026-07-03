@@ -51,4 +51,4 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
-ignore = ["E501"]
+ignore = ["E501", "RUF001", "RUF002", "RUF003"]  # deliberate typographic ×/→ in user-facing strings
