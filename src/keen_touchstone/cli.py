@@ -174,6 +174,98 @@ def _build_ingest_result(ingested, k_max, headline_k, resamples, seed):
     return result
 
 
+@main.group()
+def judge() -> None:
+    """Judge exam & license: prove the judge before trusting its judgments.
+
+    Everyone computes judge-vs-human agreement; nobody blocks on it. Here an
+    unlicensed judge's scores are not evidence — `judge gate` fails the build.
+    """
+
+
+@judge.command()
+@click.argument("anchors", type=click.Path(exists=True))
+@click.option("--judge-labels", "judge_labels_path", type=click.Path(exists=True), default=None,
+              help="BYO judge answers (JSONL: item_id + judge_label true/false/\"unknown\").")
+@click.option("--run-judge", "run_judge_flag", is_flag=True, help="Run the built-in thin judge over the anchors instead.")
+@click.option("--model", default=None, help="Judge model for --run-judge (e.g. anthropic/claude-sonnet-5, ollama/qwen3:14b).")
+@click.option("--judge-id", default=None, help="Judge identity on the license (default: model or labels filename).")
+@click.option("--epsilon", type=float, default=0.2, show_default=True, help="alt-test cost-benefit margin (paper: 0.1–0.2).")
+@click.option("--q", type=float, default=0.05, show_default=True, help="alt-test FDR level (Benjamini–Yekutieli).")
+@click.option("--kappa-threshold", type=float, default=0.6, show_default=True, help="Minimum κ for a license (0.8 = strong).")
+@click.option("--min-items", type=int, default=30, show_default=True)
+@click.option("--max-abstention", type=float, default=0.2, show_default=True)
+@click.option("--strict", is_flag=True, help="Gate on the κ CI lower bound instead of the point estimate.")
+@click.option("--seed", type=int, default=2026, show_default=True)
+@click.option("--out", type=click.Path(path_type=Path), default=Path("out/judge"), show_default=True)
+def calibrate(anchors: str, judge_labels_path: str | None, run_judge_flag: bool, model: str | None,
+              judge_id: str | None, epsilon: float, q: float, kappa_threshold: float,
+              min_items: int, max_abstention: float, strict: bool, seed: int, out: Path) -> None:
+    """Exam a judge against human-labeled anchors and issue (or refuse) a license."""
+    from keen_touchstone.artifacts import CalibrationThresholds
+    from keen_touchstone.judge.anchors import read_anchors, read_judge_labels
+    from keen_touchstone.judge.calibrate import calibrate as run_calibration
+    from keen_touchstone.report.judge_emit import emit_license
+
+    if (judge_labels_path is None) == (not run_judge_flag):
+        raise click.UsageError("pass exactly one of --judge-labels FILE or --run-judge --model M")
+    if run_judge_flag and not model:
+        raise click.UsageError("--run-judge requires --model")
+
+    with _CleanErrors():
+        anchor_set = read_anchors(anchors)
+        prompt_hash = None
+        extra_notes: list[str] = []
+        if run_judge_flag:
+            from keen_touchstone.judge.runner import run_judge
+
+            console.print(f"[dim]running judge {model} over {len(anchor_set.items)} anchor items…[/dim]")
+            run = run_judge(anchor_set, model=model)
+            labels, prompt_hash = run.labels, run.prompt_hash
+            extra_notes.extend(run.warnings)
+            resolved_judge_id = judge_id or model
+        else:
+            labels = read_judge_labels(judge_labels_path)
+            resolved_judge_id = judge_id or Path(judge_labels_path).stem
+
+        thresholds = CalibrationThresholds(
+            kappa_licensed=kappa_threshold, min_items=min_items,
+            max_abstention=max_abstention, gate_on="ci_low" if strict else "point",
+        )
+        calibration, exam_result, alt = run_calibration(
+            anchor_set, labels, judge_id=resolved_judge_id, judge_model=model,
+            judge_prompt_hash=prompt_hash, thresholds=thresholds,
+            epsilon=epsilon, q=q, seed=seed, extra_notes=extra_notes,
+        )
+        emit_license(calibration, exam_result, alt, out, console=console)
+    if calibration.status != "JUDGE_LICENSED":
+        raise SystemExit(1)
+
+
+@judge.command()
+@click.argument("license_file", type=click.Path(exists=True))
+def gate(license_file: str) -> None:
+    """The CI gate: exit 0 iff the license says JUDGE_LICENSED."""
+    import json as json_mod
+
+    import jsonschema as jsonschema_mod
+
+    from keen_touchstone.artifacts import JudgeCalibration, load_schema
+    from keen_touchstone.judge.license import check_license
+
+    with _CleanErrors():
+        data = json_mod.loads(Path(license_file).read_text())
+        try:
+            jsonschema_mod.validate(data, load_schema("judge-calibration"))
+        except jsonschema_mod.ValidationError as err:
+            raise ValueError(f"{license_file} is not a valid license: {err.message}") from err
+        calibration = JudgeCalibration.model_validate(data)
+    ok, message = check_license(calibration)
+    console.print(("[green]" if ok else "[red]") + message)
+    if not ok:
+        raise SystemExit(1)
+
+
 @main.command()
 @click.option("--epochs", type=int, default=12, show_default=True)
 @click.option("--out", type=click.Path(path_type=Path), default=Path("out/demo"), show_default=True)

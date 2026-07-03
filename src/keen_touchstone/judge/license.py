@@ -64,9 +64,10 @@ def issue_license(
     anchor_set_ref: str | None = None,
     n_human_annotators: int = 1,
     thresholds: CalibrationThresholds | None = None,
+    extra_notes: list[str] | None = None,
 ) -> JudgeCalibration:
     thresholds = thresholds or CalibrationThresholds()
-    reasons: list[str] = list(exam.notes)
+    reasons: list[str] = list(exam.notes) + list(extra_notes or [])
     blocking: list[str] = []
 
     withhold_kappa = exam.n_total < thresholds.min_items
