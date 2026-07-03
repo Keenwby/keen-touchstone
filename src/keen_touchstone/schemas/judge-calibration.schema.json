@@ -68,7 +68,8 @@
       "properties": {
         "kappa_licensed": { "type": "number", "description": "Minimum kappa for JUDGE_LICENSED (default 0.6 'acceptable' per Landis-Koch; 0.8 = strong)." },
         "min_items": { "type": "integer", "description": "Minimum human-labeled items before a kappa point estimate is shown at all (default 30)." },
-        "max_abstention": { "type": "number", "description": "Abstention rate above which the judge cannot be licensed." }
+        "max_abstention": { "type": "number", "description": "Abstention rate above which the judge cannot be licensed." },
+        "gate_on": { "type": "string", "enum": ["point", "ci_low"], "description": "Whether the kappa threshold applies to the point estimate (default, industry convention) or the CI lower bound (strict mode). Recorded so every license is auditable." }
       },
       "additionalProperties": false
     },

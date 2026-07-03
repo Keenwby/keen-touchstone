@@ -120,6 +120,7 @@ class CalibrationThresholds(BaseModel):
     kappa_licensed: float = 0.6  # Landis-Koch "acceptable"; 0.8 = strong
     min_items: int = 30  # below this, no kappa point estimate at all
     max_abstention: float = 0.2
+    gate_on: Literal["point", "ci_low"] = "point"  # strict mode gates on the CI lower bound
 
 
 class JudgeCalibration(BaseModel):
