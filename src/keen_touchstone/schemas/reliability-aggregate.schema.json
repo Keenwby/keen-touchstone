@@ -35,6 +35,11 @@
       "minimum": 0, "maximum": 1,
       "description": "pass^k = P(all k succeed). The headline reliability number."
     },
+    "headline_k": {
+      "type": ["integer", "null"],
+      "minimum": 1,
+      "description": "The k that pass_at_k / pass_hat_k / their CIs refer to. Added in v0.1 implementation: a headline estimate without its k is ambiguous."
+    },
     "pass_hat_k_ci_low": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "CI on the pass^k ESTIMATE itself (Inspect lacks this)." },
     "pass_hat_k_ci_high": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
     "ci_method": {
