@@ -96,6 +96,74 @@ def test_multi_model_logs_rejected(demo_logs: list) -> None:
         trials_from_logs([log, clone])
 
 
+def test_mixed_configurations_rejected(demo_logs: list) -> None:
+    """Adversarial-review regression: same task name + model but different
+    task_args must not silently pool into one pass^k."""
+    from keen_touchstone.adapters.inspect_logs import trials_from_logs
+
+    log = demo_logs[0]
+    clone = log.model_copy(deep=True)
+    clone.eval.task_args = {"difficulty": "hard"}
+    with pytest.raises(ValueError, match="differ in configuration"):
+        trials_from_logs([log, clone])
+
+
+def test_dict_scores_error_without_key_and_work_with_key(demo_logs: list) -> None:
+    """Adversarial-review regression: dict-valued Score.value silently
+    flattened to 0.0 (a 100%-reliable agent reported as 0%). Now: hard error
+    without --score-key; correct counts with it."""
+    from keen_touchstone.adapters.inspect_logs import trials_from_logs
+
+    log = demo_logs[0].model_copy(deep=True)
+    for sample in log.samples:
+        score = sample.scores["simulated_flaky_scorer"]
+        score.value = {"acc": score.value, "style": "I"}
+
+    with pytest.raises(ValueError, match="--score-key"):
+        trials_from_logs([log])
+    with pytest.raises(ValueError, match="not in score dict"):
+        trials_from_logs([log], score_key="nope")
+
+    keyed = trials_from_logs([log], score_key="acc")
+    plain = trials_from_logs([demo_logs[0]])
+    assert {t.task_key: (t.n, t.c) for t in keyed.tasks} == {
+        t.task_key: (t.n, t.c) for t in plain.tasks
+    }
+    assert keyed.scorer_name == "simulated_flaky_scorer[acc]"
+    # the decoy key would have flagged everything as failure
+    style = trials_from_logs([log], score_key="style")
+    assert all(t.c == 0 for t in style.tasks)
+
+
+def test_list_scores_rejected(demo_logs: list) -> None:
+    from keen_touchstone.adapters.inspect_logs import trials_from_logs
+
+    log = demo_logs[0].model_copy(deep=True)
+    for sample in log.samples:
+        sample.scores["simulated_flaky_scorer"].value = [1.0, 0.0]
+    with pytest.raises(ValueError, match="list values"):
+        trials_from_logs([log])
+
+
+def test_resolve_log_paths_dedupes_overlapping_sources(tmp_path_factory) -> None:
+    """Adversarial-review regression: dir + a file inside it (or the same path
+    twice) must not double every task's n and c."""
+    import inspect_ai
+
+    from keen_touchstone.adapters.inspect_logs import resolve_log_paths
+    from keen_touchstone.demo.flaky_task import touchstone_demo
+
+    log_dir = tmp_path_factory.mktemp("dedupe-logs")
+    inspect_ai.eval(
+        tasks=touchstone_demo(), model="mockllm/model", epochs=2, log_dir=str(log_dir)
+    )
+    only = resolve_log_paths([str(log_dir)])
+    assert len(only) == 1
+    file_path = next(log_dir.glob("*.eval"))
+    combined = resolve_log_paths([str(log_dir), str(file_path), str(file_path)])
+    assert len(combined) == 1
+
+
 def test_cli_demo_end_to_end(tmp_path) -> None:
     """The first-session payoff, as the user would run it: aggregate.json is
     written and every element validates against the canonical schema."""

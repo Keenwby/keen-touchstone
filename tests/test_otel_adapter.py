@@ -133,6 +133,34 @@ def test_cli_ingest_demo_end_to_end(tmp_path) -> None:
     assert (out / "traces.demo.jsonl").exists()
 
 
+def test_token_coercion_tolerates_malformed_usage() -> None:
+    """Adversarial-review regression: a float-as-string token value aborted
+    the whole ingest; malformed usage now counts 0, never crashes."""
+    spans = [{
+        "trace_id": "t1", "span_id": "s1", "parent_span_id": None,
+        "gen_ai.operation.name": "invoke_agent", "harness.step_id": 0,
+        "harness.task_signature": "sig", "gen_ai.request.model": "m",
+        "harness.outcome": "success",
+        "gen_ai.usage.input_tokens": "300.5", "gen_ai.usage.output_tokens": "garbage",
+    }]
+    ingest = trials_from_traces(spans)
+    assert ingest.tasks[0].tokens == (300,)
+
+
+def test_cli_clean_error_on_bad_ingest(tmp_path) -> None:
+    """Domain errors reach the user as a clean message, not a traceback."""
+    from click.testing import CliRunner
+
+    from keen_touchstone.cli import main
+
+    bad = tmp_path / "bad.jsonl"
+    bad.write_text('{"trace_id": "t", "span_id": "s"}\n')  # no signature/outcome
+    result = CliRunner().invoke(main, ["ingest", str(bad)])
+    assert result.exit_code == 1
+    assert "Error:" in result.output
+    assert "Traceback" not in result.output
+
+
 def test_read_spans_jsonl_errors(tmp_path) -> None:
     bad = tmp_path / "bad.jsonl"
     bad.write_text('{"trace_id": "a", "span_id": "s"}\nnot-json\n')

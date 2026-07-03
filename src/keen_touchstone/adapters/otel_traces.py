@@ -57,10 +57,24 @@ class TraceRun:
     @property
     def total_tokens(self) -> int:
         return sum(
-            int(s.get("gen_ai.usage.input_tokens") or 0)
-            + int(s.get("gen_ai.usage.output_tokens") or 0)
+            _as_int(s.get("gen_ai.usage.input_tokens")) + _as_int(s.get("gen_ai.usage.output_tokens"))
             for s in self.spans
         )
+
+
+def _as_int(value: Any) -> int:
+    """Tolerant token-count coercion: ints, floats, and numeric strings
+    (including "300.5") all count; garbage counts as 0 rather than aborting
+    an entire ingest over one malformed usage attribute."""
+    if value is None:
+        return 0
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        try:
+            return int(float(value))
+        except (TypeError, ValueError):
+            return 0
 
 
 class TaskSignatureStrategy(Protocol):

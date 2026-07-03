@@ -72,7 +72,12 @@ class ReliabilityAggregate(BaseModel):
     headline_k: int | None = Field(default=None, ge=1)
     pass_hat_k_ci_low: float | None = Field(default=None, ge=0, le=1)
     pass_hat_k_ci_high: float | None = Field(default=None, ge=0, le=1)
-    ci_method: Literal["bootstrap", "clustered_se", "beta_binomial", "wilson"] | None = None
+    ci_method: (
+        Literal[
+            "bootstrap", "bootstrap_posterior_envelope", "clustered_se", "beta_binomial", "wilson"
+        ]
+        | None
+    ) = None
     reliability_decay_curve: list[DecayCurvePoint] = Field(default_factory=list)
     variance: float | None = None
     skew: float | None = None

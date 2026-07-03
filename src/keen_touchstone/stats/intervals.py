@@ -77,10 +77,10 @@ class CurveCI:
     seed: int | None
     n_resamples: int
     widened_ks: tuple[int, ...] = ()
-    """k values where the plain bootstrap degenerated to zero width (every
+    """k values where the bootstrap component alone was zero-width (every
     per-task estimate identical — typical at k near n, where the UMVUE
-    collapses to {0,1}) and the interval was widened with Beta-posterior
-    draws. A zero-width CI from resampling is never a credible claim."""
+    collapses to {0,1}); there the envelope's width comes entirely from the
+    posterior component. Surfaced so reports can flag the deep tail."""
 
 
 def bootstrap_ci_curve(
@@ -91,13 +91,30 @@ def bootstrap_ci_curve(
     seed: int | None = None,
     level: float = 0.95,
 ) -> CurveCI:
-    """Percentile cluster-bootstrap CI for the suite aggregate at each k.
+    """CI band for the suite aggregate at each k: the element-wise envelope of
+    a percentile cluster bootstrap and a posterior band on the same resamples.
 
-    One set of task-resample indices is shared across every k, so each
-    bootstrap replicate is itself a coherent (monotone) decay curve and the
-    band moves coherently along k. Every task must have n >= max(ks); build
-    per-k task subsets upstream (``decay_curve`` records them) and call once
-    per subset if extending past min(n_i).
+    Construction (all on ONE set of task-resample indices, shared across k):
+
+    1. **Cluster bootstrap** — resample tasks, mean of per-task point
+       estimates per replicate, percentile interval per k.
+    2. **Posterior band** — same task resamples, but each drawn task
+       contributes p_i ~ Beta(c+1/2, n-c+1/2) (Jeffreys) and the replicate
+       mean of p_i^k (or 1-(1-p_i)^k for pass@k).
+    3. **Envelope** — low = min of the two lows, high = max of the two highs.
+
+    Why the envelope instead of the bootstrap alone: near k = n the per-task
+    estimator collapses to {0, 1}; when every estimate is equal the bootstrap
+    band has zero width — a false claim of certainty — and widening only the
+    degenerate k's would mix bound types along the curve, letting the upper
+    band *rise* with k (asserting the impossible P(all k+1) > P(all k); found
+    in adversarial review). Both component bands are monotone along k (every
+    replicate curve is), so their envelope is monotone, never narrower than
+    either component, and slightly conservative — the honest direction.
+
+    Every task must have n >= max(ks); build per-k task subsets upstream
+    (``decay_curve`` records them) and call once per subset if extending past
+    min(n_i).
     """
     if not tasks:
         raise ValueError("no tasks supplied")
@@ -116,28 +133,26 @@ def bootstrap_ci_curve(
     idx = rng.integers(0, n_tasks, size=(n_resamples, n_tasks))
     replicate_means = est[:, idx].mean(axis=2)  # (K, B)
     lo_q, hi_q = (0.5 - level / 2) * 100, (0.5 + level / 2) * 100
-    lows, highs = np.percentile(replicate_means, [lo_q, hi_q], axis=1)
+    boot_lows, boot_highs = np.percentile(replicate_means, [lo_q, hi_q], axis=1)
 
-    # Degeneracy guard: if every replicate is identical at some k (typical at
-    # k near n where the UMVUE collapses to {0,1}), the percentile interval
-    # has zero width — a false claim of certainty. Widen (never narrow) with a
-    # posterior bootstrap: same task resamples, p_i drawn from each task's
-    # Jeffreys Beta posterior, replicate mean of p_i^k.
-    widened: list[int] = []
-    degenerate = [i for i, (lo, hi) in enumerate(zip(lows, highs, strict=True)) if lo == hi]
-    if degenerate:
-        alpha_post = np.array([t.c + JEFFREYS_PRIOR[0] for t in tasks])
-        beta_post = np.array([t.n - t.c + JEFFREYS_PRIOR[1] for t in tasks])
-        p_draws = rng.beta(alpha_post[idx], beta_post[idx])  # (B, T)
-        for i in degenerate:
-            k = ks[i]
-            bayes_means = (p_draws**k).mean(axis=1)
-            b_lo, b_hi = np.percentile(bayes_means, [lo_q, hi_q])
-            lows[i], highs[i] = min(lows[i], b_lo), max(highs[i], b_hi)
-            widened.append(k)
+    # posterior component on the same resamples
+    alpha_post = np.array([t.c + JEFFREYS_PRIOR[0] for t in tasks])
+    beta_post = np.array([t.n - t.c + JEFFREYS_PRIOR[1] for t in tasks])
+    p_draws = rng.beta(alpha_post[idx], beta_post[idx])  # (B, T)
+    if statistic == "pass_hat_k":
+        post_means = np.stack([(p_draws**k).mean(axis=1) for k in ks])  # (K, B)
+    else:
+        post_means = np.stack([(1 - (1 - p_draws) ** k).mean(axis=1) for k in ks])
+    post_lows, post_highs = np.percentile(post_means, [lo_q, hi_q], axis=1)
+
+    degenerate = tuple(
+        k for k, lo, hi in zip(ks, boot_lows, boot_highs, strict=True) if lo == hi
+    )
+    lows = np.minimum(boot_lows, post_lows)
+    highs = np.maximum(boot_highs, post_highs)
 
     intervals = {
-        k: Interval(float(lo), float(hi), "bootstrap", level)
+        k: Interval(float(lo), float(hi), "bootstrap_posterior_envelope", level)
         for k, lo, hi in zip(ks, lows, highs, strict=True)
     }
     return CurveCI(
@@ -146,7 +161,7 @@ def bootstrap_ci_curve(
         small_sample_warning=n_tasks < SMALL_SAMPLE_TASKS,
         seed=seed,
         n_resamples=n_resamples,
-        widened_ks=tuple(widened),
+        widened_ks=degenerate,
     )
 
 

@@ -1,5 +1,7 @@
 """Interval correctness: golden properties, reproducibility, and empirical coverage."""
 
+from itertools import pairwise
+
 import numpy as np
 import pytest
 
@@ -70,10 +72,53 @@ def test_bootstrap_reproducible_and_ordered() -> None:
     for k, ci in a.intervals.items():
         point = aggregate_pass_hat_k(tasks, k)
         assert ci.low <= point <= ci.high
-        assert ci.method == "bootstrap"
+        assert ci.method == "bootstrap_posterior_envelope"
     # the band is coherent along k: bounds decay like the point estimate does
     assert a.intervals[3].high <= a.intervals[1].high + 1e-12
     assert a.intervals[3].low <= a.intervals[1].low + 1e-12
+
+
+def test_band_monotone_everywhere_including_degenerate_tail() -> None:
+    """Adversarial-review regression: mixing a plain bootstrap bound at k with
+    a posterior bound at k+1 let the upper band RISE at the degenerate tail —
+    an impossible claim (P(all k+1) > P(all k)). The envelope must keep both
+    bounds non-increasing on every suite, including ones whose deepest k is
+    degenerate-at-zero (no task perfect)."""
+    reviewer_suite = [
+        TaskTrials(name, 7, c)
+        for name, c in [
+            ("login", 6), ("search", 5), ("checkout", 2),
+            ("refund", 6), ("upload", 4), ("export", 3),
+        ]
+    ]
+    suites = [reviewer_suite] + [_suite(seed, n_tasks=6, n=7) for seed in range(30)]
+    for i, tasks in enumerate(suites):
+        ks = list(range(1, min(t.n for t in tasks) + 1))
+        band = bootstrap_ci_curve(tasks, ks=ks, seed=7)
+        highs = [band.intervals[k].high for k in ks]
+        lows = [band.intervals[k].low for k in ks]
+        for k, (a, b) in enumerate(pairwise(highs), start=1):
+            assert b <= a + 1e-12, f"suite {i}: upper band rises at k={k}->{k + 1}: {a} -> {b}"
+        for k, (a, b) in enumerate(pairwise(lows), start=1):
+            assert b <= a + 1e-12, f"suite {i}: lower band rises at k={k}->{k + 1}: {a} -> {b}"
+
+
+def test_envelope_never_narrower_than_plain_bootstrap() -> None:
+    """The envelope may only widen the pure task-bootstrap percentile band."""
+    tasks = _suite(3)
+    ks = [1, 2, 3, 5]
+    band = bootstrap_ci_curve(tasks, ks=ks, seed=11, n_resamples=800)
+    # recompute the plain bootstrap component with the same rng consumption
+    rng = np.random.default_rng(11)
+    idx = rng.integers(0, len(tasks), size=(800, len(tasks)))
+    from keen_touchstone.stats import pass_hat_k
+
+    est = np.array([[pass_hat_k(t.n, t.c, k) for t in tasks] for k in ks])
+    means = est[:, idx].mean(axis=2)
+    b_lo, b_hi = np.percentile(means, [2.5, 97.5], axis=1)
+    for j, k in enumerate(ks):
+        assert band.intervals[k].low <= b_lo[j] + 1e-12
+        assert band.intervals[k].high >= b_hi[j] - 1e-12
 
 
 def test_bootstrap_width_shrinks_with_more_tasks() -> None:
@@ -92,7 +137,8 @@ def test_bootstrap_small_sample_warning() -> None:
 
 def test_degenerate_bootstrap_is_widened_not_certain() -> None:
     """All per-task estimates identical (here: all zero) would give a [0, 0]
-    'CI' — a false claim of certainty. The guard widens with posterior draws."""
+    'CI' — a false claim of certainty. The posterior component of the envelope
+    supplies honest width, and the degenerate ks are surfaced."""
     tasks = [TaskTrials(f"t{i}", 10, 0) for i in range(6)]
     band = bootstrap_ci_curve(tasks, ks=[1, 2], seed=1)
     assert band.widened_ks == (1, 2)
@@ -103,7 +149,7 @@ def test_degenerate_bootstrap_is_widened_not_certain() -> None:
         assert ci.high < 0.35  # but stays anchored to the data (0/10 x 6 tasks)
 
 
-def test_nondegenerate_bootstrap_untouched() -> None:
+def test_nondegenerate_suite_reports_no_widened_ks() -> None:
     band = bootstrap_ci_curve(_suite(1), ks=[1, 2, 3], seed=42)
     assert band.widened_ks == ()
 

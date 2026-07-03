@@ -38,13 +38,25 @@ def shared_options(fn):
     return fn
 
 
+class _CleanErrors:
+    """Domain errors (bad inputs, mixed configs) become clean CLI messages."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type in (ValueError, FileNotFoundError):
+            raise click.ClickException(str(exc))
+        return False
+
+
 def _analyze_logs(
     logs: list, scorer: str | None, out: Path, k_max: int | None, headline_k: int | None,
-    resamples: int, seed: int, source: str,
+    resamples: int, seed: int, source: str, score_key: str | None = None,
 ) -> None:
     from keen_touchstone.adapters.inspect_logs import trials_from_logs
 
-    ingest = trials_from_logs(logs, scorer=scorer)
+    ingest = trials_from_logs(logs, scorer=scorer, score_key=score_key)
     result = build_suite_result(
         ingest.tasks,
         context="offline",
@@ -66,16 +78,19 @@ def _analyze_logs(
 
 
 @main.command()
-@click.argument("logs", nargs=-1, required=True)
+@click.argument("logs", nargs=-1, required=True, type=click.Path(exists=True))
 @click.option("--scorer", default=None, help="Scorer name to read (required if the logs carry several).")
+@click.option("--score-key", default=None, help="For dict-valued scores: the key that defines success.")
 @click.option("--out", type=click.Path(path_type=Path), default=Path("out/analysis"), show_default=True)
 @shared_options
-def analyze(logs: tuple[str, ...], scorer: str | None, out: Path, k_max: int | None, headline_k: int | None, resamples: int, seed: int) -> None:
+def analyze(logs: tuple[str, ...], scorer: str | None, score_key: str | None, out: Path, k_max: int | None, headline_k: int | None, resamples: int, seed: int) -> None:
     """Analyze existing Inspect .eval/.json logs (files or log directories)."""
     from keen_touchstone.adapters.inspect_logs import resolve_log_paths
 
-    paths = resolve_log_paths(list(logs))
-    _analyze_logs(paths, scorer, out, k_max, headline_k, resamples, seed, source=f"inspect logs: {len(paths)} file(s)")
+    with _CleanErrors():
+        paths = resolve_log_paths(list(logs))
+        _analyze_logs(paths, scorer, out, k_max, headline_k, resamples, seed,
+                      source=f"inspect logs: {len(paths)} file(s)", score_key=score_key)
 
 
 @main.command()
@@ -84,8 +99,9 @@ def analyze(logs: tuple[str, ...], scorer: str | None, out: Path, k_max: int | N
 @click.option("--epochs", type=int, default=10, show_default=True, help="Trials per task (the N in pass^k).")
 @click.option("--out", type=click.Path(path_type=Path), default=Path("out/run"), show_default=True)
 @click.option("--scorer", default=None)
+@click.option("--score-key", default=None, help="For dict-valued scores: the key that defines success.")
 @shared_options
-def run(task_file: str, model: str, epochs: int, out: Path, scorer: str | None, k_max: int | None, headline_k: int | None, resamples: int, seed: int) -> None:
+def run(task_file: str, model: str, epochs: int, out: Path, scorer: str | None, score_key: str | None, k_max: int | None, headline_k: int | None, resamples: int, seed: int) -> None:
     """Run an Inspect task with N epochs, then analyze the resulting log."""
     import inspect_ai
 
@@ -93,7 +109,9 @@ def run(task_file: str, model: str, epochs: int, out: Path, scorer: str | None, 
     eval_logs = inspect_ai.eval(
         tasks=task_file, model=model, epochs=epochs, log_dir=str(out / "logs")
     )
-    _analyze_logs(list(eval_logs), scorer, out, k_max, headline_k, resamples, seed, source=f"inspect run: {task_file} ({epochs} epochs)")
+    with _CleanErrors():
+        _analyze_logs(list(eval_logs), scorer, out, k_max, headline_k, resamples, seed,
+                      source=f"inspect run: {task_file} ({epochs} epochs)", score_key=score_key)
 
 
 @main.command()
@@ -122,9 +140,25 @@ def ingest(traces: Path | None, use_demo: bool, outcome_regex: str | None, thres
         traces = write_spans_jsonl(out / "traces.demo.jsonl", gen_spans(seed=seed))
         console.print(f"[dim]generated synthetic demo traces → {traces}[/dim]")
 
-    ingested = trials_from_traces(
-        read_spans_jsonl(traces), threshold=threshold, outcome_regex=outcome_regex
+    with _CleanErrors():
+        ingested = trials_from_traces(
+            read_spans_jsonl(traces), threshold=threshold, outcome_regex=outcome_regex
+        )
+        result = _build_ingest_result(ingested, k_max, headline_k, resamples, seed)
+    emit(
+        result,
+        out,
+        RunMeta(
+            source=f"otel traces: {traces} ({ingested.n_runs} runs)",
+            task_name="(derived from traces)",
+            model=ingested.model,
+            scorer="declared outcomes",
+        ),
+        console=console,
     )
+
+
+def _build_ingest_result(ingested, k_max, headline_k, resamples, seed):
     result = build_suite_result(
         ingested.tasks,
         context="online",
@@ -137,17 +171,7 @@ def ingest(traces: Path | None, use_demo: bool, outcome_regex: str | None, thres
         seed=seed,
     )
     result.warnings.extend(ingested.warnings)
-    emit(
-        result,
-        out,
-        RunMeta(
-            source=f"otel traces: {traces} ({ingested.n_runs} runs)",
-            task_name="(derived from traces)",
-            model=ingested.model,
-            scorer="declared outcomes",
-        ),
-        console=console,
-    )
+    return result
 
 
 @main.command()

@@ -44,8 +44,8 @@
     "pass_hat_k_ci_high": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
     "ci_method": {
       "type": ["string", "null"],
-      "enum": ["bootstrap", "clustered_se", "beta_binomial", "wilson", null],
-      "description": "Below a few hundred items, do NOT use CLT/Wald; use Bayesian/bootstrap."
+      "enum": ["bootstrap", "bootstrap_posterior_envelope", "clustered_se", "beta_binomial", "wilson", null],
+      "description": "Below a few hundred items, do NOT use CLT/Wald; use Bayesian/bootstrap. bootstrap_posterior_envelope (added in v0.1): element-wise envelope of a task-cluster bootstrap and a Jeffreys-posterior band on the same resamples — keeps the decay band monotone along k where a bootstrap alone degenerates near k=n."
     },
     "reliability_decay_curve": {
       "type": "array",

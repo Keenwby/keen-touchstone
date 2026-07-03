@@ -235,9 +235,9 @@ code {{ font-size: .92em; }}
 <footer class="card">
   <strong>How these numbers were computed (the honesty footer).</strong><br>
   pass^k per task = C(c,k)/C(n,k) — the τ-bench unbiased estimator, identical to Inspect AI's <code>pass_k</code> reducer; suite = mean over tasks.
-  Suite CI = cluster bootstrap resampling <em>tasks</em> (never pooled attempts), {suite.ci_method}, seed-reproducible.
+  Suite CI band = envelope of a cluster bootstrap resampling <em>tasks</em> (never pooled attempts) and a Jeffreys-posterior band on the same resamples ({suite.ci_method}, seed-reproducible) — coherent (monotone) along k, never narrower than either component; where the bootstrap alone would collapse to zero width near k = n, the posterior supplies the honest width.
   Curve range k ≤ min(nᵢ) so the task set is constant across k. Headline k = {hk} (defaults to half the curve depth: near k = n the per-task estimator degenerates to 0/1).
-  Per-task CIs: Jeffreys Beta posterior, endpoints raised to the k-th power.
+  Per-task CIs: Jeffreys Beta posterior, endpoints raised to the k-th power; the per-task <em>point</em> is the UMVUE, which is exactly 0 when c &lt; k — at that boundary it can sit marginally below its own (Bayesian) interval. Two correct estimators, one edge; shown unreconciled rather than fudged.
   A wide interval is the honest product — never suppressed.<br>
   keen-touchstone {__version__} · {html_mod.escape(meta.task_name)} · agent_config {html_mod.escape(suite.agent_config_hash)}
 </footer>

@@ -73,6 +73,10 @@ def build_suite_result(
     warnings: list[str] = []
 
     common = max_common_k(tasks)
+    if k_max is not None and k_max > common:
+        warnings.append(
+            f"requested k_max={k_max} exceeds min trials per task ({common}); clamped to {common}"
+        )
     curve_k_max = min(k_max, common) if k_max is not None else common
     if headline_k is None:
         headline_k = default_headline_k(curve_k_max)
@@ -100,9 +104,9 @@ def build_suite_result(
         )
     if band.widened_ks:
         warnings.append(
-            f"bootstrap CI degenerated to zero width at k={list(band.widened_ks)} (per-task "
-            "estimator saturates near k=n); those intervals were widened with Beta-posterior "
-            "draws rather than reported as false certainty"
+            f"at k={list(band.widened_ks)} the bootstrap component of the CI is zero-width "
+            "(per-task estimator saturates near k=n); the band there comes entirely from the "
+            "Beta-posterior component of the envelope"
         )
 
     decomp = variance_decomposition(tasks)
@@ -133,7 +137,7 @@ def build_suite_result(
         headline_k=headline_k,
         pass_hat_k_ci_low=headline_ci.low,
         pass_hat_k_ci_high=headline_ci.high,
-        ci_method="bootstrap",
+        ci_method="bootstrap_posterior_envelope",
         reliability_decay_curve=curve_models,
         variance=decomp.observed_between_task_variance,
         skew=decomp.skew,
