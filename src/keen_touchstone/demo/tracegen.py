@@ -36,13 +36,36 @@ def gen_spans(
     model: str = DEMO_MODEL,
     unsigned_runs: int = 2,
     config_hash: str | None = None,
+    include_outcomes: bool = True,
 ) -> list[dict[str, Any]]:
     """Deterministic synthetic spans. ``unsigned_runs`` adds runs without a
-    task signature so exclusion accounting is visible in the demo."""
+    task signature so exclusion accounting is visible in the demo.
+    ``include_outcomes=False`` omits harness.outcome — the unlabeled-traffic
+    shape that the judge-verdict loop exists for."""
+    spans, _ = gen_spans_with_truth(
+        seed=seed, tasks=tasks, runs_per_task=runs_per_task, model=model,
+        unsigned_runs=unsigned_runs, config_hash=config_hash,
+        include_outcomes=include_outcomes,
+    )
+    return spans
+
+
+def gen_spans_with_truth(
+    seed: int = 2026,
+    tasks: dict[str, float] | None = None,
+    runs_per_task: int = 12,
+    model: str = DEMO_MODEL,
+    unsigned_runs: int = 2,
+    config_hash: str | None = None,
+    include_outcomes: bool = True,
+) -> tuple[list[dict[str, Any]], dict[str, bool]]:
+    """Like gen_spans, but also returns the latent truth (trace_id → really
+    succeeded) — the test/demo oracle that production traffic never has."""
     tasks = tasks if tasks is not None else DEMO_TRACE_TASKS
     rng = random.Random(seed)
     config = config_hash or f"democfg{seed:05d}"
     spans: list[dict[str, Any]] = []
+    truth: dict[str, bool] = {}
     run_no = 0
 
     def add_run(signature: str | None, p: float) -> None:
@@ -50,6 +73,7 @@ def gen_spans(
         run_no += 1
         trace_id = f"{rng.getrandbits(64):016x}{run_no:016x}"
         succeeded = rng.random() < p
+        truth[trace_id] = succeeded
         step = 0
 
         def span(span_id: str, parent: str | None, op: str, extra: dict[str, Any]) -> None:
@@ -66,10 +90,9 @@ def gen_spans(
             base.update(extra)
             spans.append(base)
 
-        root_extra: dict[str, Any] = {
-            "gen_ai.request.model": model,
-            "harness.outcome": "success" if succeeded else "failure",
-        }
+        root_extra: dict[str, Any] = {"gen_ai.request.model": model}
+        if include_outcomes:
+            root_extra["harness.outcome"] = "success" if succeeded else "failure"
         if signature is not None:
             root_extra["harness.task_signature"] = signature
         span("0001", None, "invoke_agent", root_extra)
@@ -98,7 +121,7 @@ def gen_spans(
     for _ in range(unsigned_runs):
         add_run(None, 0.5)
 
-    return spans
+    return spans, truth
 
 
 def write_spans_jsonl(path: str | Path, spans: list[dict[str, Any]]) -> Path:

@@ -167,7 +167,12 @@ def trials_from_traces(
     strategy: TaskSignatureStrategy | None = None,
     threshold: float = 1.0,
     outcome_regex: str | None = None,
+    outcome_overrides: dict[str, bool] | None = None,
 ) -> TraceIngest:
+    """``outcome_overrides`` (trace_id → outcome, e.g. from a licensed judge's
+    verdicts) REPLACES span-attribute outcome resolution entirely: the verdict
+    layer is authoritative, and runs without a verdict are excluded
+    (reason: no_verdict) — never resolved from a mix of sources."""
     strategy = strategy or DeclaredTagStrategy()
 
     by_trace: dict[str, list[Span]] = {}
@@ -186,10 +191,16 @@ def trials_from_traces(
         if signature is None:
             excluded["no_task_signature"] += 1
             continue
-        outcome = _resolve_outcome(run, threshold, outcome_regex)
-        if outcome is None:
-            excluded["no_resolvable_outcome"] += 1
-            continue
+        if outcome_overrides is not None:
+            outcome = outcome_overrides.get(run.trace_id)
+            if outcome is None:
+                excluded["no_verdict"] += 1
+                continue
+        else:
+            outcome = _resolve_outcome(run, threshold, outcome_regex)
+            if outcome is None:
+                excluded["no_resolvable_outcome"] += 1
+                continue
         model = run.attr("gen_ai.request.model") or run.attr("gen_ai.response.model")
         if model:
             models[str(model)] += 1

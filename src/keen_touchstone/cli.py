@@ -119,16 +119,23 @@ def run(task_file: str, model: str, epochs: int, out: Path, scorer: str | None, 
 @click.option("--demo", "use_demo", is_flag=True, help="Generate synthetic demo traces instead of reading a file.")
 @click.option("--outcome-regex", default=None, help="Fallback outcome rule: regex matched against the root span's output.messages.")
 @click.option("--threshold", type=float, default=1.0, show_default=True, help="Success threshold for gen_ai.evaluation.score.value.")
+@click.option("--outcomes-from", "verdicts_path", type=click.Path(exists=True), default=None,
+              help="EvalVerdict JSONL as the authoritative outcome source (joined on trace_id).")
+@click.option("--license", "license_path", type=click.Path(exists=True), default=None,
+              help="Judge license (license.json) — REQUIRED when verdicts contain model-graded scores.")
 @click.option("--out", type=click.Path(path_type=Path), default=Path("out/ingest"), show_default=True)
 @shared_options
 def ingest(traces: Path | None, use_demo: bool, outcome_regex: str | None, threshold: float,
+           verdicts_path: str | None, license_path: str | None,
            out: Path, k_max: int | None, headline_k: int | None, resamples: int, seed: int) -> None:
     """Ingest OTel gen_ai.* spans (JSONL) — production traces in, pass^k out.
 
     No golden dataset: runs group by the declared harness.task_signature and
     outcomes come from harness.outcome / gen_ai.evaluation.score.* /
-    --outcome-regex. Runs with no signature or no resolvable outcome are
-    excluded and counted, never guessed.
+    --outcome-regex — or, for unlabeled traffic, from a LICENSED judge's
+    verdicts (--outcomes-from + --license; an unlicensed judge is refused).
+    Runs with no signature or no resolvable outcome are excluded and counted,
+    never guessed.
     """
     from keen_touchstone.adapters.otel_traces import read_spans_jsonl, trials_from_traces
 
@@ -141,8 +148,26 @@ def ingest(traces: Path | None, use_demo: bool, outcome_regex: str | None, thres
         console.print(f"[dim]generated synthetic demo traces → {traces}[/dim]")
 
     with _CleanErrors():
+        outcome_overrides = None
+        scorer_label = "declared outcomes"
+        if verdicts_path is not None:
+            from keen_touchstone.judge.verdicts import (
+                load_license,
+                outcomes_from_verdicts,
+                read_verdicts,
+            )
+
+            verdicts = read_verdicts(verdicts_path)
+            license_ = load_license(license_path) if license_path else None
+            outcome_overrides = outcomes_from_verdicts(verdicts, license_, threshold=threshold)
+            scorer_label = (
+                f"licensed judge {license_.judge_id} ({license_.calibration_id})"
+                if license_ is not None
+                else "programmatic verdicts"
+            )
         ingested = trials_from_traces(
-            read_spans_jsonl(traces), threshold=threshold, outcome_regex=outcome_regex
+            read_spans_jsonl(traces), threshold=threshold, outcome_regex=outcome_regex,
+            outcome_overrides=outcome_overrides,
         )
         result = _build_ingest_result(ingested, k_max, headline_k, resamples, seed)
     emit(
@@ -152,7 +177,7 @@ def ingest(traces: Path | None, use_demo: bool, outcome_regex: str | None, thres
             source=f"otel traces: {traces} ({ingested.n_runs} runs)",
             task_name="(derived from traces)",
             model=ingested.model,
-            scorer="declared outcomes",
+            scorer=scorer_label,
         ),
         console=console,
     )
@@ -240,6 +265,20 @@ def calibrate(anchors: str, judge_labels_path: str | None, run_judge_flag: bool,
         emit_license(calibration, exam_result, alt, out, console=console)
     if calibration.status != "JUDGE_LICENSED":
         raise SystemExit(1)
+
+
+@judge.command("demo")
+@click.option("--items", type=int, default=60, show_default=True, help="Anchor items in the synthetic exam.")
+@click.option("--seed", type=int, default=2026, show_default=True)
+@click.option("--out", type=click.Path(path_type=Path), default=Path("out/judge-demo"), show_default=True)
+def judge_demo(items: int, seed: int, out: Path) -> None:
+    """Keyless end-to-end: exam two judges → license one, block one → the
+    licensed judge labels unlabeled traces → pass^k report; the unlicensed
+    judge is refused in the data path."""
+    from keen_touchstone.demo.judge_demo import run_judge_demo
+
+    with _CleanErrors():
+        run_judge_demo(out, n_items=items, seed=seed, console=console)
 
 
 @judge.command()
