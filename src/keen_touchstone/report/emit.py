@@ -47,8 +47,14 @@ def emit(result: SuiteResult, out_dir: Path, meta: RunMeta, console: Console | N
     json_path = out_dir / "aggregate.json"
     json_path.write_text(json.dumps(payload, indent=2) + "\n")
 
+    from .html import render_html
+
+    html_path = out_dir / "report.html"
+    html_path.write_text(render_html(result, meta))
+
     _print_summary(result, meta, console)
     console.print(f"\n[dim]wrote[/dim] {json_path}")
+    console.print(f"[dim]wrote[/dim] {html_path}  [dim](open in a browser)[/dim]")
     return json_path
 
 

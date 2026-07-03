@@ -37,6 +37,9 @@ class DecayCurvePoint(BaseModel):
     pass_hat_k: float = Field(ge=0, le=1)
     ci_low: float | None = None
     ci_high: float | None = None
+    pass_at_k: float | None = Field(default=None, ge=0, le=1)
+    """The capability twin at the same k — kept beside pass^k so the
+    'pass@k climbs while pass^k collapses' contrast is one artifact."""
 
 
 class Attribution(BaseModel):

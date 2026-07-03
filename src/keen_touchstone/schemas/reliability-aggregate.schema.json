@@ -57,7 +57,8 @@
           "k": { "type": "integer", "minimum": 1 },
           "pass_hat_k": { "type": "number", "minimum": 0, "maximum": 1 },
           "ci_low": { "type": ["number", "null"] },
-          "ci_high": { "type": ["number", "null"] }
+          "ci_high": { "type": ["number", "null"] },
+          "pass_at_k": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Capability twin at the same k (added in v0.1: the pass@k-vs-pass^k contrast is the shareable artifact)." }
         }
       }
     },

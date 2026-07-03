@@ -112,6 +112,7 @@ def build_suite_result(
             pass_hat_k=pt.pass_hat_k,
             ci_low=band.intervals[pt.k].low,
             ci_high=band.intervals[pt.k].high,
+            pass_at_k=pt.pass_at_k,
         )
         for pt in points
     ]
