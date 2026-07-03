@@ -147,13 +147,13 @@ code {{ font-size:.92em; }}
 
 <header>
   <h1>KeenTouchstone — judge exam（裁判体检单）</h1>
-  <div class="sub">judge <code>{html_mod.escape(cal.judge_id)}</code>{f" · model <code>{html_mod.escape(cal.judge_model)}</code>" if cal.judge_model else ""} · anchors {html_mod.escape(cal.anchor_set_ref or "—")} · {cal.created_at}</div>
+  <div class="sub">judge <code>{html_mod.escape(cal.judge_id)}</code>{f" · model <code>{html_mod.escape(cal.judge_model)}</code>" if cal.judge_model else ""} · anchors {html_mod.escape(cal.anchor_set_ref or "—")} · {html_mod.escape(cal.created_at)}</div>
 </header>
 
 <section class="card banner">
   <span class="dot" style="background:var({'--ok' if licensed else '--bad'})"></span>
   <span class="{'ok' if licensed else 'bad'}">{cal.status}</span>
-  <span class="sub" style="margin:0">license <code>{cal.calibration_id}</code></span>
+  <span class="sub" style="margin:0">license <code>{html_mod.escape(cal.calibration_id)}</code></span>
 </section>
 
 <section class="tiles">

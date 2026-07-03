@@ -240,6 +240,14 @@ def trials_from_traces(
         )
     for reason, count in excluded.items():
         warnings.append(f"excluded {count} run(s): {reason} (excluded, not counted as failures)")
+    if outcome_overrides is not None:
+        run_ids = {run.trace_id for run in runs}
+        dangling = sum(1 for tid in outcome_overrides if tid not in run_ids)
+        if dangling:
+            warnings.append(
+                f"{dangling} verdict(s)/override(s) matched no run in these traces — stale "
+                "export or wrong trace file?"
+            )
 
     tasks = [
         TaskTrials(

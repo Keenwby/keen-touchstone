@@ -124,6 +124,25 @@ def test_exam_one_class_anchor_set_refuses_kappa() -> None:
     assert any("one outcome class" in n for n in result.notes)
 
 
+def test_exam_ci_withheld_when_minority_class_tiny() -> None:
+    """Round-2 regression: percentile-bootstrap κ CI undercovers badly with a
+    tiny minority class (measured ~77% at 90% prevalence, n=30) — withhold it
+    loudly instead of overstating confidence."""
+    human = [True] * 36 + [False] * 4  # minority class: 4 < 10
+    judge = list(human)
+    judge[0] = not judge[0]
+    result = exam(human, judge)
+    assert result.kappa is not None  # the point estimate stands
+    assert result.kappa_ci is None  # the interval does not
+    assert any("minority outcome class" in n for n in result.notes)
+
+
+def test_exam_ci_present_with_healthy_classes() -> None:
+    human, judge = _labels(60, seed=3, p_pass=0.5)
+    result = exam(human, judge, seed=3)
+    assert result.kappa_ci is not None
+
+
 def test_exam_kappa_paradox_note_on_imbalance() -> None:
     # 92% pass base rate -> paradox warning even with decent agreement
     human = [True] * 46 + [False] * 4

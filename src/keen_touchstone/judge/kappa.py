@@ -23,6 +23,13 @@ import numpy as np
 
 from keen_touchstone.stats.intervals import Interval, beta_binomial_ci
 
+MIN_CLASS_FOR_CI = 10
+"""Adversarial-review round 2: the percentile bootstrap for κ undercovers
+badly when the minority outcome class is tiny (empirical coverage as low as
+~77% at 90% prevalence, n=30 — measured, not guessed). Below this many items
+in the smaller class the κ CI is WITHHELD with a plain-language note instead
+of shipping an interval that overstates confidence."""
+
 
 @dataclass(frozen=True)
 class ExamResult:
@@ -128,17 +135,27 @@ def exam(
         if kappa is None:  # pragma: no cover — unreachable when classes are mixed
             notes.append("kappa undefined (degenerate marginals)")
         else:
-            kappa_ci, n_dropped = _kappa_bootstrap_ci(h, j, n_resamples, seed, level)
-            if kappa_ci is None:
+            minority = int(min(np.sum(h), np.sum(~h)))
+            if minority < MIN_CLASS_FOR_CI:
                 notes.append(
-                    "kappa CI unavailable: most bootstrap resamples were single-class "
-                    "(anchor set too small or too imbalanced)"
+                    f"κ CI withheld: only {minority} item(s) in the minority outcome class — "
+                    "a percentile bootstrap materially overstates confidence in this regime "
+                    f"(measured coverage down to ~77%); label more "
+                    f"{'failures' if np.sum(~h) < np.sum(h) else 'passes'} "
+                    f"(need ≥ {MIN_CLASS_FOR_CI} per class)"
                 )
-            elif n_dropped:
-                notes.append(
-                    f"kappa CI computed on {n_resamples - n_dropped}/{n_resamples} resamples "
-                    "(single-class resamples dropped)"
-                )
+            else:
+                kappa_ci, n_dropped = _kappa_bootstrap_ci(h, j, n_resamples, seed, level)
+                if kappa_ci is None:
+                    notes.append(
+                        "kappa CI unavailable: most bootstrap resamples were single-class "
+                        "(anchor set too small or too imbalanced)"
+                    )
+                elif n_dropped:
+                    notes.append(
+                        f"kappa CI computed on {n_resamples - n_dropped}/{n_resamples} resamples "
+                        "(single-class resamples dropped)"
+                    )
         if min(prevalence, 1 - prevalence) < 0.15:
             notes.append(
                 f"anchor set is imbalanced (pass rate {prevalence:.0%}): the kappa paradox "

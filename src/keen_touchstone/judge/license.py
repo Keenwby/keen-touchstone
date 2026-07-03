@@ -152,16 +152,83 @@ def issue_license(
     )
 
 
+def derive_blockers(calibration: JudgeCalibration) -> list[str]:
+    """Recompute the licensing decision from the numbers the license itself
+    records. The gate NEVER takes the stored ``status`` on its word
+    (adversarial-review round 2: a status flipped by hand, or a buggy issuer,
+    must not pass just because the field says so)."""
+    t = calibration.thresholds
+    blockers: list[str] = []
+    if calibration.anchor_n_items < t.min_items:
+        blockers.append(f"n={calibration.anchor_n_items} < min_items={t.min_items}")
+    elif calibration.kappa is None:
+        blockers.append("κ absent")
+    else:
+        if t.gate_on == "ci_low":
+            if calibration.kappa_ci_low is None:
+                blockers.append("strict mode (ci_low) but no κ CI recorded")
+            elif calibration.kappa_ci_low < t.kappa_licensed:
+                blockers.append(
+                    f"κ CI-low {calibration.kappa_ci_low:.3f} < threshold {t.kappa_licensed}"
+                )
+        elif calibration.kappa < t.kappa_licensed:
+            blockers.append(f"κ {calibration.kappa:.3f} < threshold {t.kappa_licensed}")
+    if (calibration.abstention_rate or 0.0) > t.max_abstention:
+        blockers.append(
+            f"abstention {calibration.abstention_rate:.0%} > {t.max_abstention:.0%}"
+        )
+    alt = calibration.alt_test
+    if alt is not None and alt.applicable and alt.passed is False:
+        blockers.append(f"alt-test failed (ω={alt.omega})")
+    return blockers
+
+
 def check_license(calibration: JudgeCalibration) -> tuple[bool, str]:
     """The gate. Returns (ok, plain-language message). Callers (CLI, ingest)
-    must treat ok=False as build-blocking."""
+    must treat ok=False as build-blocking.
+
+    Trust boundary, stated honestly: license.json is an artifact of YOUR OWN
+    pipeline, not a cryptographic credential — this tool cannot stop its
+    operator from editing files on their own disk. What the gate does
+    guarantee: (a) the stored status is re-derived from the stored numbers,
+    so a flipped status or a self-contradictory license is refused; (b)
+    unusually lenient thresholds are named out loud, never silent. Signed
+    licenses (HMAC) are a candidate for a later phase if licenses ever cross
+    a trust boundary."""
+    blockers = derive_blockers(calibration)
+    expected = "NEEDS_HUMAN" if blockers else "JUDGE_LICENSED"
+    if calibration.status != expected:
+        detail = "; ".join(blockers) if blockers else "the recorded numbers pass every threshold"
+        return False, (
+            f"REFUSED: license {calibration.calibration_id} is self-contradictory — status says "
+            f"{calibration.status} but the recorded numbers say {expected} ({detail}). "
+            "Possible tampering or a buggy issuer; re-run `touchstone judge calibrate`."
+        )
+
+    caveats: list[str] = []
+    defaults = CalibrationThresholds()
+    t = calibration.thresholds
+    if (
+        t.kappa_licensed < defaults.kappa_licensed
+        or t.min_items < defaults.min_items
+        or t.max_abstention > defaults.max_abstention
+    ):
+        caveats.append(
+            f"NOTE: this license was issued under thresholds more lenient than the defaults "
+            f"(κ≥{t.kappa_licensed}, n≥{t.min_items}, abstention≤{t.max_abstention:.0%}) — "
+            "a policy choice, recorded and auditable, but lenient by configuration"
+        )
+
     if calibration.status == "JUDGE_LICENSED":
         kappa = f"κ={calibration.kappa:.3f}" if calibration.kappa is not None else "κ withheld"
-        return True, (
+        message = (
             f"JUDGE_LICENSED: {calibration.judge_id} ({kappa}, "
             f"n={calibration.anchor_n_items}, issued {calibration.created_at})"
         )
-    why = "; ".join(calibration.reasons[:3]) or "no reasons recorded"
+        if caveats:
+            message += ". " + " ".join(caveats)
+        return True, message
+    why = "; ".join(calibration.reasons[:3]) or "; ".join(blockers)
     return False, (
         f"NEEDS_HUMAN: {calibration.judge_id} is not licensed — {why}. "
         "Scores from this judge are not evidence; fix the judge or label more anchors."

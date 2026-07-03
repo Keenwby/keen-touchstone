@@ -40,6 +40,12 @@ from scipy import stats as scipy_stats
 
 MIN_ANNOTATORS = 3
 T_TEST_MIN_N = 30  # paper: below this, normality is doubtful -> Wilcoxon
+MIN_ITEMS_PER_ANNOTATOR = 10
+"""Hard power floor (adversarial-review round 2): below ~10 comparable items
+no small-sample test can support 'may replace humans' — a 3-item panel must
+never mint that verdict. The paper itself recommends 50–100 items; annotators
+under this floor are skipped, and if fewer than 3 remain the whole test is
+honestly 'underpowered', not computed anyway."""
 
 
 @dataclass(frozen=True)
@@ -75,12 +81,29 @@ def _inapplicable(reason: str, epsilon: float, q: float, notes: list[str]) -> Al
 
 
 def _one_sided_p(d: np.ndarray, epsilon: float, test_method: str) -> tuple[float, str]:
-    """Left-tailed test of H0: mean(d) >= epsilon, per the paper."""
-    if np.all(d == d[0]):
-        # zero spread: the sample mean IS the observed statistic; the null is
-        # contradicted outright or not at all
-        return (0.0 if float(d[0]) < epsilon else 1.0), "degenerate"
+    """Left-tailed test of H0: mean(d) >= epsilon, per the paper.
+
+    Zero-variance samples (every d_i identical) get an EXACT conservative
+    Bernoulli bound instead of a fabricated limit (adversarial-review round 2:
+    the old branch returned p=0.0, asserting population certainty from any
+    n — and inverted the evidence ordering vs the Wilcoxon path). With
+    d ∈ {-1, 0, 1} and H0: E[d] >= ε:
+
+      - all d_i = 0  (parity):        P(d < 1)  <= 1 - ε per draw  → p = (1-ε)^n
+      - all d_i = -1 (judge sweeps):  P(d = -1) <= (1-ε)/2 per draw → p = ((1-ε)/2)^n
+      - constant c >= ε:              consistent with H0            → p = 1.0
+
+    So ties are weak evidence that only accumulates with n (12 tied items at
+    ε=0.2 give p≈0.069 — still not significant), while a clean sweep is
+    strong evidence at modest n. No assumption of symmetry needed.
+    """
     n = len(d)
+    if np.all(d == d[0]):
+        c = float(d[0])
+        if c >= epsilon:
+            return 1.0, "degenerate"
+        per_draw = (1 - epsilon) / 2 if c <= -1 else (1 - epsilon)
+        return float(per_draw**n), "exact_bound"
     use_t = test_method == "t" or (test_method == "auto" and n >= T_TEST_MIN_N)
     if use_t:
         result = scipy_stats.ttest_1samp(d, popmean=epsilon, alternative="less")
@@ -147,19 +170,21 @@ def alt_test(
             s_h = float(np.mean([h_ji == o for o in others]))
             w_f.append(int(s_f >= s_h))
             w_h.append(int(s_h >= s_f))
-        if len(w_f) < 2:
+        if len(w_f) < MIN_ITEMS_PER_ANNOTATOR:
             skipped.append(j)
             continue
         per_annotator.append((j, np.array(w_f), np.array(w_h), np.array(w_h) - np.array(w_f)))
 
     if skipped:
         notes.append(
-            f"annotator(s) {skipped} skipped: fewer than 2 comparable items"
+            f"annotator(s) {skipped} skipped: fewer than {MIN_ITEMS_PER_ANNOTATOR} comparable "
+            "items — no small-sample test can support a replace-humans verdict from that little"
         )
     if len(per_annotator) < MIN_ANNOTATORS:
         return _inapplicable(
-            f"only {len(per_annotator)} annotator(s) with >= 2 comparable items "
-            f"(need {MIN_ANNOTATORS})",
+            f"underpowered: only {len(per_annotator)} annotator(s) with >= "
+            f"{MIN_ITEMS_PER_ANNOTATOR} comparable items (need {MIN_ANNOTATORS}; the paper "
+            "recommends 50–100 items)",
             epsilon, q, notes,
         )
 
@@ -170,6 +195,11 @@ def alt_test(
         p_values.append(p)
         tests.append(test)
 
+    if any(t == "exact_bound" for t in tests):
+        notes.append(
+            "zero-variance panel(s) used the exact conservative Bernoulli bound "
+            "((1-ε)^n for all-ties, ((1-ε)/2)^n for a clean judge sweep) — never a fabricated p=0"
+        )
     adjusted = scipy_stats.false_discovery_control(p_values, method="by")
     rejected = [float(p_adj) <= q for p_adj in adjusted]
 

@@ -104,6 +104,47 @@ def test_emit_license_writes_files_and_html(tmp_path) -> None:
     assert "judge exam" in html
 
 
+def test_gate_refuses_tampered_status() -> None:
+    """Round-2 regression (A2/A3): the gate re-derives the decision from the
+    recorded numbers — a hand-flipped status is refused, not trusted."""
+    cal = issue_license(_exam(agree=0.65), judge_id="sloppy")
+    assert cal.status == "NEEDS_HUMAN"
+    tampered = cal.model_copy(update={"status": "JUDGE_LICENSED"})
+    ok, msg = check_license(tampered)
+    assert not ok
+    assert "self-contradictory" in msg
+    # and the reverse direction: a good license demoted by hand is also flagged
+    good = issue_license(_exam(), judge_id="good")
+    demoted = good.model_copy(update={"status": "NEEDS_HUMAN"})
+    ok2, msg2 = check_license(demoted)
+    assert not ok2 and "self-contradictory" in msg2
+
+
+def test_gate_names_lenient_thresholds_out_loud() -> None:
+    """Round-2 regression: loosened thresholds pass (policy is the user's)
+    but the gate says so — never silent leniency."""
+    e = _exam(n=40, agree=0.8)
+    cal = issue_license(
+        e, judge_id="lenient",
+        thresholds=CalibrationThresholds(kappa_licensed=0.3, min_items=10),
+    )
+    assert cal.status == "JUDGE_LICENSED"
+    ok, msg = check_license(cal)
+    assert ok
+    assert "more lenient than the defaults" in msg
+
+
+def test_thresholds_are_bounded() -> None:
+    """Round-2 regression: kappa_licensed=-1 (an always-pass 'gate') is not a
+    legal license."""
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        CalibrationThresholds(kappa_licensed=-1)
+    with pytest.raises(ValidationError):
+        CalibrationThresholds(min_items=0)
+
+
 def test_judge_html_escapes_and_renders_needs_human() -> None:
     e = _exam(agree=0.6)
     cal = issue_license(e, judge_id="<script>x</script>")

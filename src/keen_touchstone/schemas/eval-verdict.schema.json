@@ -58,6 +58,15 @@
         "required": ["judge_calibration_ref"],
         "properties": { "judge_calibration_ref": { "type": "string" } }
       }
+    },
+    {
+      "if": { "properties": { "scorer_kind": { "enum": ["programmatic", "trajectory"] } } },
+      "then": {
+        "properties": {
+          "judge_model": { "type": "null" },
+          "judge_calibration_ref": { "type": "null" }
+        }
+      }
     }
   ],
   "additionalProperties": false

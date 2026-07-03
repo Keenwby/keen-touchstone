@@ -101,6 +101,30 @@ def outcomes_from_verdicts(
                 f"the presented license ({license_.calibration_id}) — a license is not "
                 "transferable between judges or prompts"
             )
+        # Identity binding (adversarial-review round 2): citing the license id
+        # is not enough — the verdicts must come from the judge the license
+        # was issued to. calibration_id is printed in reports; it is a name,
+        # not a secret.
+        wrong_judge = sorted({
+            v.scorer_id for v in model_graded if v.scorer_id != license_.judge_id
+        })
+        if wrong_judge:
+            raise ValueError(
+                f"verdicts are signed scorer_id={wrong_judge} but the license was issued to "
+                f"judge_id={license_.judge_id!r} — a license only covers the judge that took "
+                "the exam"
+            )
+        wrong_model = sorted({
+            str(v.judge_model)
+            for v in model_graded
+            if v.judge_model and license_.judge_model and v.judge_model != license_.judge_model
+        })
+        if wrong_model:
+            raise ValueError(
+                f"verdicts claim judge_model={wrong_model} but the license was issued for "
+                f"judge_model={license_.judge_model!r} — same judge name, different model is "
+                "a different judge"
+            )
 
     outcomes: dict[str, bool] = {}
     for v in verdicts:

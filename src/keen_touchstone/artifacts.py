@@ -91,6 +91,17 @@ class EvalVerdict(BaseModel):
                 "a model_graded verdict must carry judge_calibration_ref — an uncalibrated "
                 "judge's score is not evidence (SPEC §3, anti-circularity)"
             )
+        # Laundering guard (adversarial-review round 2): a verdict carrying
+        # LLM tells cannot self-declare as deterministic to dodge the license.
+        if self.scorer_kind != "model_graded" and (
+            self.judge_model or self.judge_calibration_ref
+        ):
+            raise ValueError(
+                f"scorer_kind={self.scorer_kind!r} but the verdict carries "
+                f"judge_model/judge_calibration_ref — a model-graded verdict cannot be "
+                "laundered as deterministic; set scorer_kind=model_graded (and present a "
+                "license) or drop the judge fields"
+            )
         return self
 
     def to_schema_dict(self) -> dict[str, Any]:
@@ -117,9 +128,9 @@ class AltTestResult(BaseModel):
 class CalibrationThresholds(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    kappa_licensed: float = 0.6  # Landis-Koch "acceptable"; 0.8 = strong
-    min_items: int = 30  # below this, no kappa point estimate at all
-    max_abstention: float = 0.2
+    kappa_licensed: float = Field(default=0.6, ge=0, le=1)  # Landis-Koch "acceptable"; 0.8 strong
+    min_items: int = Field(default=30, ge=1)  # below this, no kappa point estimate at all
+    max_abstention: float = Field(default=0.2, ge=0, le=1)
     gate_on: Literal["point", "ci_low"] = "point"  # strict mode gates on the CI lower bound
 
 
