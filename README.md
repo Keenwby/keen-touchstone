@@ -8,7 +8,31 @@
 
 ## Status
 
-**v0.1 (Phase 1 MLP) — under construction.** The Phase 0 spec (data model + schemas) lives in [`docs/spec/`](./docs/spec/) and [`src/keen_touchstone/schemas/`](./src/keen_touchstone/schemas/). License: MIT. Local development; not yet published.
+**v0.1 (Phase 1 MLP) — built, local pre-release.** The Phase 0 spec (data model + schemas) lives in [`docs/spec/`](./docs/spec/) and [`src/keen_touchstone/schemas/`](./src/keen_touchstone/schemas/). License: MIT. Not yet published to PyPI/GitHub.
+
+## Quickstart (zero API keys)
+
+```bash
+uv sync
+uv run touchstone demo            # simulated flaky agent → Inspect runner (mockllm) → stats → report
+uv run touchstone ingest --demo   # synthetic OTel gen_ai.* traces → the same stats, context=online
+open out/demo/report.html
+```
+
+The demo's terminal summary, verbatim — this is the story the tool exists to tell:
+
+```
+pass@1 80.6%  →  pass^6 37.4% [12.6%, 66.8%] 95% CI, bootstrap
+6 tasks × 12 trials (n=72 rollouts)
+```
+
+An agent that looks 80% reliable at pass@1 clears six-in-a-row barely a third of the time — and the report says so with confidence intervals, a decay curve, per-task Beta-Binomial CIs, cost columns, and a variance-decomposition "lever" note telling you whether more reruns or more tasks buys the most certainty. For your own agent:
+
+```bash
+uv run touchstone run your_task.py --model anthropic/claude-sonnet-5 --epochs 10
+uv run touchstone analyze ~/path/to/inspect/logs/        # logs you already have
+uv run touchstone ingest your_traces.jsonl               # OTel gen_ai.* spans (JSONL)
+```
 
 ## Prior art — what we concede up front
 
