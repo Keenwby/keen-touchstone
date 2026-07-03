@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/keen-touchstone/judge-calibration.schema.json",
+  "title": "KeenTouchstone JudgeCalibration",
+  "description": "The judge's exam record and license (SPEC 3b concretized in v0.2). Computed ONLY against human-confirmed labels (anti-circularity: human_label_source is structurally pinned to 'human'). An EvalVerdict with scorer_kind=model_graded must reference a calibration whose status is JUDGE_LICENSED; NEEDS_HUMAN blocks CI promotion. $id is a placeholder.",
+  "type": "object",
+  "required": [
+    "calibration_id", "judge_id", "anchor_n_items", "n_human_annotators",
+    "human_label_source", "thresholds", "status", "reasons",
+    "created_at", "keen_touchstone_version"
+  ],
+  "properties": {
+    "calibration_id": { "type": "string", "description": "Target of EvalVerdict.judge_calibration_ref." },
+    "judge_id": { "type": "string", "description": "Identity of the judge under examination (scorer id / name)." },
+    "judge_model": { "type": ["string", "null"] },
+    "judge_prompt_hash": { "type": ["string", "null"], "description": "Hash of the judging prompt/config — a changed prompt is a NEW judge needing a new license." },
+    "anchor_set_ref": { "type": ["string", "null"], "description": "Path/URI of the anchor set used for the exam." },
+    "anchor_n_items": { "type": "integer", "minimum": 1 },
+    "n_human_annotators": { "type": "integer", "minimum": 1 },
+    "human_label_source": {
+      "const": "human",
+      "description": "Anti-circularity, structurally enforced: kappa may only be computed against human-confirmed labels. Auto-generated labels may EXPAND an eval set but may never certify the judge."
+    },
+    "prevalence": {
+      "type": ["number", "null"], "minimum": 0, "maximum": 1,
+      "description": "Base rate of PASS among human labels. Surfaced because of the kappa paradox: at extreme base rates kappa can be low despite high raw agreement — read kappa TOGETHER with TPR/FPR and prevalence."
+    },
+
+    "kappa": {
+      "type": ["number", "null"], "minimum": -1, "maximum": 1,
+      "description": "Cohen's kappa vs human labels (never raw %-agreement alone). NULL when anchor_n_items < thresholds.min_items — below ~30 labels a point estimate is misleading (calibration unreliable), per the Anthropic 20-50-real-failures floor."
+    },
+    "kappa_ci_low": { "type": ["number", "null"], "minimum": -1, "maximum": 1 },
+    "kappa_ci_high": { "type": ["number", "null"], "minimum": -1, "maximum": 1 },
+    "raw_agreement": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "tpr": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Judge sensitivity: P(judge says pass | human says pass)." },
+    "tpr_ci_low": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "tpr_ci_high": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "fpr": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "P(judge says pass | human says fail) — the dangerous direction: rubber-stamping failures." },
+    "fpr_ci_low": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "fpr_ci_high": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "abstention_rate": {
+      "type": ["number", "null"], "minimum": 0, "maximum": 1,
+      "description": "'Unknown' is a legal judge answer; abstentions are excluded from kappa and counted here. High abstention is surfaced in reasons."
+    },
+
+    "alt_test": {
+      "type": ["object", "null"],
+      "description": "The alternative annotator test (ACL 2025, arXiv 2501.10970): may this LLM replace the human annotators? Requires >= 3 human annotators; inapplicable is reported honestly, never computed anyway.",
+      "required": ["applicable"],
+      "properties": {
+        "applicable": { "type": "boolean" },
+        "reason": { "type": ["string", "null"], "description": "Why inapplicable (e.g. fewer than 3 human annotators)." },
+        "epsilon": { "type": ["number", "null"], "description": "Cost-benefit margin favoring the LLM (paper's hyperparameter)." },
+        "omega": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Winning rate across leave-one-out annotators." },
+        "passed": { "type": ["boolean", "null"], "description": "omega >= 0.5 per the paper's criterion." },
+        "n_annotators": { "type": ["integer", "null"] }
+      },
+      "additionalProperties": false
+    },
+
+    "thresholds": {
+      "type": "object",
+      "description": "The gate's contract, recorded so a license is auditable.",
+      "required": ["kappa_licensed", "min_items", "max_abstention"],
+      "properties": {
+        "kappa_licensed": { "type": "number", "description": "Minimum kappa for JUDGE_LICENSED (default 0.6 'acceptable' per Landis-Koch; 0.8 = strong)." },
+        "min_items": { "type": "integer", "description": "Minimum human-labeled items before a kappa point estimate is shown at all (default 30)." },
+        "max_abstention": { "type": "number", "description": "Abstention rate above which the judge cannot be licensed." }
+      },
+      "additionalProperties": false
+    },
+    "status": { "type": "string", "enum": ["JUDGE_LICENSED", "NEEDS_HUMAN"] },
+    "reasons": {
+      "type": "array", "items": { "type": "string" },
+      "description": "Plain-language grounds for the status (too few items, kappa below threshold, high abstention, kappa-paradox caveat, ...)."
+    },
+    "created_at": { "type": "string" },
+    "keen_touchstone_version": { "type": "string" }
+  },
+  "additionalProperties": false
+}

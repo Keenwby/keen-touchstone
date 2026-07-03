@@ -17,7 +17,7 @@ from importlib.resources import files
 from typing import Any, Literal
 
 import jsonschema
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SUITE_TASK_KEY = "__suite__"
 """Reserved task_key for the suite-level rollup (documented in CHANGELOG)."""
@@ -52,6 +52,114 @@ class Attribution(BaseModel):
     method: Literal["measured_ab", "inferred_layer_hypothesis"]
     confidence_band: str | None = None
     etclovg_layer: str | None = None
+
+
+class ScoreHistoryEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    author: str | None = None
+    reason: str | None = None
+    value: bool | float | str | None = None
+    timestamp: str | None = None
+
+
+class EvalVerdict(BaseModel):
+    """Artifact C: a grader's judgment on a run, with provenance and the
+    anti-circularity calibration link. The structural rule this class exists
+    to enforce: a model-graded verdict without a judge license is invalid."""
+
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+
+    verdict_id: str
+    trace_id: str
+    sample_id: str | None = None
+    scorer_id: str
+    scorer_version: str
+    scorer_kind: Literal["programmatic", "model_graded", "trajectory"]
+    tier: Literal["T0_deterministic", "T1_reference", "T2_ungrounded"]
+    value: bool | float | str
+    explanation: str | None = None
+    judge_model: str | None = None
+    judge_calibration_ref: str | None = None
+    trajectory_invariant: bool | None = None
+    score_history: list[ScoreHistoryEntry] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _model_graded_requires_calibration(self) -> EvalVerdict:
+        if self.scorer_kind == "model_graded" and not self.judge_calibration_ref:
+            raise ValueError(
+                "a model_graded verdict must carry judge_calibration_ref — an uncalibrated "
+                "judge's score is not evidence (SPEC §3, anti-circularity)"
+            )
+        return self
+
+    def to_schema_dict(self) -> dict[str, Any]:
+        data = self.model_dump(mode="json")
+        jsonschema.validate(
+            data, load_schema("eval-verdict"), cls=jsonschema.Draft202012Validator
+        )
+        return data
+
+
+class AltTestResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    applicable: bool
+    reason: str | None = None
+    epsilon: float | None = None
+    omega: float | None = Field(default=None, ge=0, le=1)
+    passed: bool | None = None
+    n_annotators: int | None = None
+
+
+class CalibrationThresholds(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kappa_licensed: float = 0.6  # Landis-Koch "acceptable"; 0.8 = strong
+    min_items: int = 30  # below this, no kappa point estimate at all
+    max_abstention: float = 0.2
+
+
+class JudgeCalibration(BaseModel):
+    """SPEC §3b concretized: the judge's exam record and license."""
+
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+
+    calibration_id: str
+    judge_id: str
+    judge_model: str | None = None
+    judge_prompt_hash: str | None = None
+    anchor_set_ref: str | None = None
+    anchor_n_items: int = Field(ge=1)
+    n_human_annotators: int = Field(ge=1)
+    human_label_source: Literal["human"] = "human"
+    prevalence: float | None = Field(default=None, ge=0, le=1)
+
+    kappa: float | None = Field(default=None, ge=-1, le=1)
+    kappa_ci_low: float | None = Field(default=None, ge=-1, le=1)
+    kappa_ci_high: float | None = Field(default=None, ge=-1, le=1)
+    raw_agreement: float | None = Field(default=None, ge=0, le=1)
+    tpr: float | None = Field(default=None, ge=0, le=1)
+    tpr_ci_low: float | None = Field(default=None, ge=0, le=1)
+    tpr_ci_high: float | None = Field(default=None, ge=0, le=1)
+    fpr: float | None = Field(default=None, ge=0, le=1)
+    fpr_ci_low: float | None = Field(default=None, ge=0, le=1)
+    fpr_ci_high: float | None = Field(default=None, ge=0, le=1)
+    abstention_rate: float | None = Field(default=None, ge=0, le=1)
+
+    alt_test: AltTestResult | None = None
+    thresholds: CalibrationThresholds
+    status: Literal["JUDGE_LICENSED", "NEEDS_HUMAN"]
+    reasons: list[str] = Field(default_factory=list)
+    created_at: str
+    keen_touchstone_version: str
+
+    def to_schema_dict(self) -> dict[str, Any]:
+        data = self.model_dump(mode="json")
+        jsonschema.validate(
+            data, load_schema("judge-calibration"), cls=jsonschema.Draft202012Validator
+        )
+        return data
 
 
 class ReliabilityAggregate(BaseModel):
