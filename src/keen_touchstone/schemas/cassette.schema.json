@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/keen-touchstone/cassette.schema.json",
+  "title": "KeenTouchstone Cassette TraceEvent",
+  "description": "One line of an append-only JSONL cassette = the ground truth of an agent run, enabling deterministic replay of harness orchestration logic given frozen model/tool outputs. A Cassette file is a stream of these objects (JSONL). $id is a placeholder.",
+  "type": "object",
+  "required": ["run_id", "step_id", "timestamp", "kind", "input", "output"],
+  "properties": {
+    "run_id": {
+      "type": "string",
+      "description": "== Span.trace_id. JOIN KEY."
+    },
+    "step_id": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "== Span.harness.step_id. Linear replay order; per-kind cursors index off this."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Recorded wall-clock time. Replay serves this via clock virtualization."
+    },
+    "kind": {
+      "type": "string",
+      "enum": ["llm_call", "tool_call", "decision"]
+    },
+    "input": {
+      "description": "Exact recorded input. On replay, stubs assert the replay input matches this (divergence detection)."
+    },
+    "output": {
+      "description": "Recorded output, returned verbatim by the replay stub with zero network."
+    },
+    "metadata": {
+      "type": "object",
+      "description": "model_id / tool_id etc. Replay VALIDATES these match the live call; mismatch = divergence, not silent fallthrough.",
+      "properties": {
+        "model_id": { "type": "string" },
+        "tool_id": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

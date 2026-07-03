@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/keen-touchstone/eval-verdict.schema.json",
+  "title": "KeenTouchstone EvalVerdict",
+  "description": "A grader's judgment on a run, keyed to trace_id, with provenance and an anti-circularity calibration link. $id is a placeholder.",
+  "type": "object",
+  "required": ["verdict_id", "trace_id", "scorer_id", "scorer_version", "scorer_kind", "tier", "value"],
+  "properties": {
+    "verdict_id": { "type": "string" },
+    "trace_id": { "type": "string", "description": "FK → Span.trace_id. JOIN KEY." },
+    "sample_id": { "type": ["string", "null"], "description": "offline dataset sample id, if any" },
+    "scorer_id": { "type": "string" },
+    "scorer_version": { "type": "string" },
+    "scorer_kind": {
+      "type": "string",
+      "enum": ["programmatic", "model_graded", "trajectory"]
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["T0_deterministic", "T1_reference", "T2_ungrounded"],
+      "description": "Grader cascade. Default T0. Falling back to T2_ungrounded must be justified."
+    },
+    "value": {
+      "type": ["boolean", "number", "string"],
+      "description": "bool | float | categorical"
+    },
+    "explanation": { "type": ["string", "null"] },
+    "judge_model": {
+      "type": ["string", "null"],
+      "description": "null for programmatic graders"
+    },
+    "judge_calibration_ref": {
+      "type": ["string", "null"],
+      "description": "→ JudgeCalibration run. REQUIRED (non-null) when scorer_kind=model_graded; a model_graded verdict with no calibration link is rejected. Resolving to NEEDS_HUMAN (or sub-threshold kappa) BLOCKS CI promotion."
+    },
+    "trajectory_invariant": {
+      "type": ["boolean", "null"],
+      "description": "Did the verdict depend on the EXACT path? false = path-invariant (gaming-resistant, checks properties not sequence). Set for scorer_kind=trajectory."
+    },
+    "score_history": {
+      "type": "array",
+      "description": "Inspect-style provenance: author, reason, original + edits.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "author": { "type": "string" },
+          "reason": { "type": "string" },
+          "value": { "type": ["boolean", "number", "string"] },
+          "timestamp": { "type": "string", "format": "date-time" }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "scorer_kind": { "const": "model_graded" } } },
+      "then": {
+        "required": ["judge_calibration_ref"],
+        "properties": { "judge_calibration_ref": { "type": "string" } }
+      }
+    }
+  ],
+  "additionalProperties": false
+}

@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/keen-touchstone/reliability-aggregate.schema.json",
+  "title": "KeenTouchstone ReliabilityAggregate",
+  "description": "N rollouts of one task rolled into a reliability distribution. The SAME shape is emitted in offline, online, and replay contexts (the unified loop). Store distributions, never bare point estimates. $id is a placeholder.",
+  "type": "object",
+  "required": ["task_key", "agent_config_hash", "model", "n_rollouts", "context", "pass_rate"],
+  "properties": {
+    "task_key": {
+      "type": "string",
+      "description": "task_id (offline) OR Span.harness.task_signature (online). The grouping key for 'the same task'."
+    },
+    "task_key_source": {
+      "type": "string",
+      "enum": ["dataset_id", "task_signature", "declared_tag"],
+      "description": "How task_key was derived. task_signature carries an intra-cluster coherence readout elsewhere."
+    },
+    "agent_config_hash": { "type": "string" },
+    "model": { "type": "string" },
+    "n_rollouts": { "type": "integer", "minimum": 1 },
+    "context": {
+      "type": "string",
+      "enum": ["offline", "online", "replay"],
+      "description": "The SAME metric definition across all three = the offline<->online loop."
+    },
+
+    "pass_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+    "pass_at_k": {
+      "type": ["number", "null"],
+      "minimum": 0, "maximum": 1,
+      "description": "P(at least one of k succeeds)"
+    },
+    "pass_hat_k": {
+      "type": ["number", "null"],
+      "minimum": 0, "maximum": 1,
+      "description": "pass^k = P(all k succeed). The headline reliability number."
+    },
+    "pass_hat_k_ci_low": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "CI on the pass^k ESTIMATE itself (Inspect lacks this)." },
+    "pass_hat_k_ci_high": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+    "ci_method": {
+      "type": ["string", "null"],
+      "enum": ["bootstrap", "clustered_se", "beta_binomial", "wilson", null],
+      "description": "Below a few hundred items, do NOT use CLT/Wald; use Bayesian/bootstrap."
+    },
+    "reliability_decay_curve": {
+      "type": "array",
+      "description": "pass^k for k = 1..N (Inspect lacks this). Each point carries its own CI.",
+      "items": {
+        "type": "object",
+        "required": ["k", "pass_hat_k"],
+        "properties": {
+          "k": { "type": "integer", "minimum": 1 },
+          "pass_hat_k": { "type": "number", "minimum": 0, "maximum": 1 },
+          "ci_low": { "type": ["number", "null"] },
+          "ci_high": { "type": ["number", "null"] }
+        }
+      }
+    },
+    "variance": { "type": ["number", "null"] },
+    "skew": { "type": ["number", "null"] },
+
+    "cost_mean": { "type": ["number", "null"], "description": "cost as a co-equal axis" },
+    "cost_p95": { "type": ["number", "null"] },
+    "token_mean": { "type": ["number", "null"] },
+
+    "power_status": {
+      "type": ["string", "null"],
+      "enum": ["SIGNIFICANT", "NOISE", "UNDERPOWERED_NEED_MORE_N", null],
+      "description": "Output of the power-analysis gate."
+    },
+
+    "attribution": {
+      "type": ["object", "null"],
+      "description": "Optional model-vs-harness adjudication (SPEC section 6). Measured A/B is high-trust; layer hypothesis is low-trust.",
+      "properties": {
+        "model_share": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "measured via model-swap counterfactual" },
+        "harness_share": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "measured via harness-ablation counterfactual" },
+        "method": { "type": "string", "enum": ["measured_ab", "inferred_layer_hypothesis"] },
+        "confidence_band": { "type": ["string", "null"] },
+        "etclovg_layer": {
+          "type": ["string", "null"],
+          "enum": ["execution", "tooling", "context", "lifecycle", "observability", "verification", "governance", null],
+          "description": "Ranked HINT only — never an authoritative verdict (SOTA step-attribution ~14%)."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+
+# Env / secrets
+.env
+.env.local
+
+# Outputs
+out/
+logs/
+*.eval
+!tests/fixtures/*.eval
+
+# OS
+.DS_Store

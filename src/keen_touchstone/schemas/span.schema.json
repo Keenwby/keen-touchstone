@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/keen-touchstone/span.schema.json",
+  "title": "KeenTouchstone Span",
+  "description": "A single step in an agent run. OTel gen_ai.* canonical vocabulary + net-new harness.* fields. $id is a placeholder pending repo/domain.",
+  "type": "object",
+  "required": ["trace_id", "span_id", "gen_ai.operation.name", "harness.step_id"],
+  "properties": {
+    "trace_id": { "type": "string", "description": "W3C trace id. THE join key across all artifacts." },
+    "span_id": { "type": "string" },
+    "parent_span_id": { "type": ["string", "null"], "description": "null for the root span of a run" },
+    "gen_ai.operation.name": {
+      "type": "string",
+      "enum": ["chat", "embeddings", "execute_tool", "invoke_agent", "create_agent", "retrieval"]
+    },
+    "gen_ai.provider.name": { "type": "string" },
+    "gen_ai.request.model": { "type": "string" },
+    "gen_ai.response.model": { "type": "string" },
+    "gen_ai.usage.input_tokens": { "type": "integer", "minimum": 0 },
+    "gen_ai.usage.output_tokens": { "type": "integer", "minimum": 0 },
+    "gen_ai.conversation.id": { "type": "string", "description": "session join" },
+    "gen_ai.agent.id": { "type": "string" },
+    "gen_ai.agent.name": { "type": "string" },
+    "gen_ai.tool.name": { "type": "string" },
+    "gen_ai.tool.call.id": { "type": "string" },
+    "input.messages": {
+      "description": "OPT-IN, privacy-gated. Oversized payloads stored by reference (content-addressed hash).",
+      "type": ["array", "string", "null"]
+    },
+    "output.messages": { "type": ["array", "string", "null"] },
+
+    "harness.step_id": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "NET-NEW. Monotonic per-run integer giving a deterministic linear replay order the span tree lacks."
+    },
+    "harness.task_signature": {
+      "type": ["string", "null"],
+      "description": "NET-NEW. Task-identity key (SPEC section 5). Keystone for online pass^k: groups organic production runs into 'the same task'. Null until a TaskSignatureStrategy assigns one."
+    },
+    "harness.agent_config_hash": {
+      "type": "string",
+      "description": "NET-NEW. Hash of {prompts, tools, model params, scaffold version} = the harness identity. Used for reliability grouping and model-vs-harness A/B."
+    },
+    "harness.replay.cassette_ref": {
+      "type": ["string", "null"],
+      "description": "NET-NEW. Pointer from a live span to its reproducing cassette event (run_id:step_id)."
+    },
+    "harness.nondeterminism_class": {
+      "type": ["string", "null"],
+      "enum": ["llm_sample", "tool", "clock", "rng", "concurrency", "data_drift", "config_drift", null],
+      "description": "NET-NEW. First-class label of the non-determinism source, for replay."
+    }
+  },
+  "additionalProperties": true
+}
