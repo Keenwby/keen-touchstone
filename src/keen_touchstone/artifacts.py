@@ -107,8 +107,10 @@ class AltTestResult(BaseModel):
     applicable: bool
     reason: str | None = None
     epsilon: float | None = None
+    q: float | None = None  # FDR level of the BY correction
     omega: float | None = Field(default=None, ge=0, le=1)
     passed: bool | None = None
+    avg_advantage_probability: float | None = Field(default=None, ge=0, le=1)
     n_annotators: int | None = None
 
 

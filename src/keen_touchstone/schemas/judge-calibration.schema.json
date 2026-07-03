@@ -51,9 +51,11 @@
       "properties": {
         "applicable": { "type": "boolean" },
         "reason": { "type": ["string", "null"], "description": "Why inapplicable (e.g. fewer than 3 human annotators)." },
-        "epsilon": { "type": ["number", "null"], "description": "Cost-benefit margin favoring the LLM (paper's hyperparameter)." },
-        "omega": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Winning rate across leave-one-out annotators." },
+        "epsilon": { "type": ["number", "null"], "description": "Cost-benefit margin favoring the LLM (paper uses 0.1-0.2)." },
+        "q": { "type": ["number", "null"], "description": "FDR level of the Benjamini-Yekutieli correction (paper: 0.05)." },
+        "omega": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Winning rate across leave-one-out annotators (after BY correction)." },
         "passed": { "type": ["boolean", "null"], "description": "omega >= 0.5 per the paper's criterion." },
+        "avg_advantage_probability": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "rho-bar: P(judge at least as aligned as a randomly chosen annotator) — the paper's judge-comparison measure." },
         "n_annotators": { "type": ["integer", "null"] }
       },
       "additionalProperties": false
