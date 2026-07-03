@@ -66,11 +66,29 @@ The output is a `ReliabilityAggregate` (see [`SPEC.md`](./docs/spec/SPEC.md) §4
 | Phase | Deliverable | Status |
 |---|---|---|
 | 0 | 4-artifact open spec (`Span`/`Cassette`/`EvalVerdict`/`ReliabilityAggregate` on one `trace_id`) | ✅ `docs/spec/` |
-| **1** | **trace-bootstrap → `pass^k` ± CI + decay curve (this MLP)** | 🚧 |
-| 2 | judge calibration as a CI-blocking gate (κ + alt-test → `JUDGE_LICENSED`/`NEEDS_HUMAN`) | — |
+| 1 | trace-bootstrap → `pass^k` ± CI + decay curve | ✅ |
+| **2** | **judge calibration as a CI-blocking gate (κ + alt-test → `JUDGE_LICENSED`/`NEEDS_HUMAN`)** | ✅ |
 | 3 | cassette + deterministic replay (harness-logic re-execution) | — |
 | 4 | online layer + the unified offline↔online loop | — |
 | 5 | model-vs-harness attribution (counterfactual adjudication) | — |
+
+## The judge gate (Phase 2)
+
+Everyone *computes* judge-vs-human agreement (Ragas, Vertex AI); **nobody blocks on it**. KeenTouchstone does:
+
+```bash
+uv run touchstone judge demo          # keyless: exam two judges — one licensed, one blocked
+uv run touchstone judge calibrate anchors.jsonl --judge-labels answers.jsonl
+                                      # your judge takes the exam → license.json + 体检单 report
+uv run touchstone judge gate out/judge/license.json     # CI: exit 1 blocks the build
+uv run touchstone ingest traces.jsonl --outcomes-from verdicts.jsonl --license license.json
+                                      # unlabeled traffic + LICENSED judge → pass^k (the loop)
+```
+
+- **The exam:** Cohen's κ vs human-confirmed labels (never raw agreement — a judge that always says "pass" gets 80% agreement on an 80%-pass set while discriminating nothing), with item-bootstrap CIs; TPR and **FPR (the rubber-stamp direction)** with Jeffreys CIs; abstentions excluded and counted, never coerced; the κ paradox surfaced on imbalanced sets.
+- **The alt-test** (ACL 2025): with ≥3 human annotators, a formal statistical answer to "may this judge replace your annotators?" — leave-one-annotator-out, Benjamini–Yekutieli FDR correction, winning rate ω ≥ 0.5. Fewer than 3 annotators → honestly "not applicable", never computed anyway.
+- **Anti-circularity, structural:** anchor labels must be `label_source: "human"` — auto-generated labels can expand an eval set but can never certify the judge that made them.
+- **The gate is in the data path, not just CI:** model-graded verdicts without a matching `JUDGE_LICENSED` license are refused at ingest; licenses are not transferable between judges or prompts (the judging prompt is hashed — a new prompt is a new judge).
 
 ## Development
 

@@ -1,6 +1,18 @@
 # Changelog
 
-## [Unreleased] — 0.1.0 (Phase 1 MLP, built 2026-07-02)
+## [Unreleased] — 0.2.0 (Phase 2: the judge-calibration gate, built 2026-07-03)
+
+**The second moat, delivered:** the field computes judge-vs-human agreement; KeenTouchstone gates on it — in CI (`judge gate`, exit 1) and in the data path (unlicensed judges' verdicts are refused at ingest).
+
+- **The exam** (`judge/kappa.py`): hand-implemented Cohen's κ (sklearn dev-parity to 1e-12) + item-bootstrap CI; TPR/FPR with Jeffreys CIs (FPR = the rubber-stamp direction); abstention excluded-and-counted; one-class anchor guard; κ-paradox warning on imbalanced sets.
+- **The alt-test** (`judge/alt_test.py`, from the paper's formulas — the reference repo is unlicensed and untouched): leave-one-annotator-out alignment scores, one-sided d̄-vs-ε tests (t at n≥30, Wilcoxon below, degenerate branch), Benjamini–Yekutieli FDR, winning rate ω and ρ̄; requires ≥3 annotators, honestly inapplicable below.
+- **License + gate** (`judge/license.py`): auditable JudgeCalibration artifact (new canonical schema, SPEC §3b concretized); <30 items withholds κ entirely; abstention cap; κ threshold on point (default) or CI-low (`--strict`); a failed alt-test outranks a passable κ; `judge gate` exits 1 on NEEDS_HUMAN.
+- **Anti-circularity, structural**: `label_source: "human"` pinned in schema, pydantic, and the anchors parser — auto-labels may expand eval sets, never certify their own judge.
+- **The loop** (`judge/verdicts.py` + `ingest --outcomes-from --license`): EvalVerdict JSONL (contract-validated per line) as the authoritative outcome source for unlabeled traces; model-graded verdicts require a matching JUDGE_LICENSED license; licenses are not transferable across judges/prompts (prompt hashed into identity).
+- **Thin runner** (`judge/runner.py`): one fixed hashed judging prompt via Inspect's model interface (mockllm = keyless deterministic; anthropic/ollama unchanged); unparseable replies become abstentions. Deliberately thin — "not another judge wrapper" (Phase 0 anti-goal).
+- **Keyless demo** (`touchstone judge demo`): 3 simulated annotators; good judge (κ≈0.97) licensed → labels unlabeled traces → pass^k report; sloppy judge designed by confusion matrix (FPR≈0.5) blocked by κ AND alt-test, and refused in the data path. Design note: an "accuracy + guess-bias" sloppy judge flattered itself at high base rates — error-rate design is the honest construction.
+
+## 0.1.0 (Phase 1 MLP, built 2026-07-02)
 
 **The MLP contract, delivered:** traces in → `pass^k` ± CI + reliability decay curve out, no golden dataset authored.
 
