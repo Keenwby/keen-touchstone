@@ -1,6 +1,16 @@
 # Changelog
 
-## [Unreleased] — 0.2.0 (Phase 2: the judge-calibration gate, built 2026-07-03)
+## [Unreleased] — 0.3.0 (Phase 3: cassette + deterministic replay, built 2026-07-03)
+
+**The third moat, delivered:** no shipping tool can deterministically replay an agent run. `touchstone replay` re-executes your orchestration logic against the taped model/tool outputs — same result or same crash, zero network — or names the exact step where the harness diverged.
+
+- **Cassette I/O** (`cassette/io.py`): Artifact B concretized — append-only JSONL, every line schema-validated on write AND read, flushed per event (a crash still leaves a replayable prefix); spliced/reordered/mixed-run tapes refused with line numbers. Reserved decisions: `__task_input__` (self-contained tape), `__clock__`, `__final__` (crashes are taped as `{type, message}` — reproducing the failure is the point).
+- **RecordingIO** (`cassette/record.py`): the explicit seam (`llm_call`/`tool_call`/`now`/`decision`) — no SDK monkey-patching; context manager tapes crashes and re-raises; co-emits Spans (same `trace_id`/`step_id`, `harness.replay.cassette_ref` back-pointer) so recorded runs feed `ingest` → three artifacts joined on one trace_id.
+- **ReplayIO + replay_run** (`cassette/replay.py`): all seven primitives — per-kind cursors; canonical-JSON input matching with first-difference snippets; model/tool identity validation; `CassetteExhausted` (never a silent live fallback); clock from tape; outcome reconciliation (`REPLAY FAITHFUL` / `DIVERGED …at step N`); unconsumed-events report (the other half of control-flow drift).
+- **Demo** (`touchstone replay-demo`, keyless): a deterministic harness bug — the ledger returns `"1,130.00"` and the scaffold's `float()` crashes (the model did nothing wrong; the harness did). Record 18 runs → pass^k report from the recorded spans → replay the failing run: same `ValueError`, zero network. Failures designed by trigger, not probability (Phase 2 demo lesson).
+- **Honest limits stated everywhere**: harness-logic re-execution, NOT model reproducibility; only seam-routed calls are taped; async and zero-code-change interception deferred.
+
+## 0.2.0 (Phase 2: the judge-calibration gate, built 2026-07-03)
 
 **The second moat, delivered:** the field computes judge-vs-human agreement; KeenTouchstone gates on it — in CI (`judge gate`, exit 1) and in the data path (unlicensed judges' verdicts are refused at ingest).
 

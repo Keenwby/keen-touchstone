@@ -67,8 +67,8 @@ The output is a `ReliabilityAggregate` (see [`SPEC.md`](./docs/spec/SPEC.md) §4
 |---|---|---|
 | 0 | 4-artifact open spec (`Span`/`Cassette`/`EvalVerdict`/`ReliabilityAggregate` on one `trace_id`) | ✅ `docs/spec/` |
 | 1 | trace-bootstrap → `pass^k` ± CI + decay curve | ✅ |
-| **2** | **judge calibration as a CI-blocking gate (κ + alt-test → `JUDGE_LICENSED`/`NEEDS_HUMAN`)** | ✅ |
-| 3 | cassette + deterministic replay (harness-logic re-execution) | — |
+| 2 | judge calibration as a CI-blocking gate (κ + alt-test → `JUDGE_LICENSED`/`NEEDS_HUMAN`) | ✅ |
+| **3** | **cassette + deterministic replay (harness-logic re-execution)** | ✅ |
 | 4 | online layer + the unified offline↔online loop | — |
 | 5 | model-vs-harness attribution (counterfactual adjudication) | — |
 
@@ -89,6 +89,22 @@ uv run touchstone ingest traces.jsonl --outcomes-from verdicts.jsonl --license l
 - **The alt-test** (ACL 2025): with ≥3 human annotators, a formal statistical answer to "may this judge replace your annotators?" — leave-one-annotator-out, Benjamini–Yekutieli FDR correction, winning rate ω ≥ 0.5. Fewer than 3 annotators → honestly "not applicable", never computed anyway.
 - **Anti-circularity, structural:** anchor labels must be `label_source: "human"` — auto-generated labels can expand an eval set but can never certify the judge that made them.
 - **The gate is in the data path, not just CI:** model-graded verdicts without a matching `JUDGE_LICENSED` license are refused at ingest; licenses are not transferable between judges or prompts (the judging prompt is hashed — a new prompt is a new judge).
+
+## The flight recorder (Phase 3)
+
+*"I can re-run your Tuesday incident on Wednesday and get the same failure."* No shipping tool can deterministically replay an agent run; KeenTouchstone can — with the limits stated out loud.
+
+```bash
+uv run touchstone replay-demo      # keyless: record a buggy agent live → pass^k report
+                                   # → replay the failed run → "REPLAY FAITHFUL — same
+                                   #    failure (ValueError: '1,130.00'), zero network"
+uv run touchstone replay out/replay-demo/cassettes/<run>.cassette.jsonl \
+    --entry your_module:your_agent
+```
+
+Your agent routes its nondeterminism through an explicit seam — `io.llm_call(...)`, `io.tool_call(...)`, `io.now()`, `io.decision(...)`. Recording runs it for real and tapes everything (including the crash) to an append-only, schema-validated cassette, co-emitting Spans on the same `trace_id` — so recorded runs feed straight into `touchstone ingest` and the reliability stats. Replay re-executes **your orchestration code** against the frozen outputs: per-kind cursors, input matching (a changed harness diverges loudly at the exact step, with a diff), model/tool identity checks, exhaustion that **never** silently falls back to live systems, the clock served from tape, and leftover-events reporting.
+
+**Honest limits, verbatim from the design thesis:** replay reproduces the harness orchestration logic given frozen model/tool outputs — **not model reproducibility** (hosted-API nondeterminism is unfixable from outside). Only calls routed through the seam are taped; SDK-level zero-code-change interception is future work.
 
 ## Development
 
