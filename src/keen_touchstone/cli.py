@@ -199,6 +199,101 @@ def _build_ingest_result(ingested, k_max, headline_k, resamples, seed):
     return result
 
 
+def _load_entry(entry: str):
+    import importlib
+
+    if ":" not in entry:
+        raise click.UsageError(f"--entry must be module:function, got {entry!r}")
+    module_name, fn_name = entry.split(":", 1)
+    module = importlib.import_module(module_name)
+    fn = getattr(module, fn_name, None)
+    if fn is None:
+        raise click.UsageError(f"{module_name!r} has no attribute {fn_name!r}")
+    return fn
+
+
+@main.command()
+@click.argument("cassette", type=click.Path(exists=True))
+@click.option("--entry", required=True, help="Your agent function as module:function — it will be EXECUTED locally against the tape (zero network for taped calls; this is not a sandbox).")
+def replay(cassette: str, entry: str) -> None:
+    """Deterministically re-execute a recorded run against its cassette.
+
+    Reproduces your orchestration logic under the frozen model/tool outputs —
+    same result or same crash — or names the exact step where the harness
+    diverged from the recording. Never falls back to live systems.
+    """
+    from keen_touchstone.cassette import replay_run
+
+    console.print(f"[dim]importing and executing entry {entry} against {cassette}…[/dim]")
+    with _CleanErrors():
+        entry_fn = _load_entry(entry)
+        report = replay_run(cassette, entry_fn)
+    style = "green" if report.faithful else "red"
+    console.print(f"[{style}]{report.verdict}[/{style}]")
+    if not report.faithful:
+        raise SystemExit(1)
+
+
+@main.command("replay-demo")
+@click.option("--invoices", type=int, default=6, show_default=True)
+@click.option("--runs-per-invoice", type=int, default=3, show_default=True)
+@click.option("--out", type=click.Path(path_type=Path), default=Path("out/replay-demo"), show_default=True)
+def replay_demo(invoices: int, runs_per_invoice: int, out: Path) -> None:
+    """Keyless end-to-end: record a buggy agent live → pass^k report from the
+    recorded spans → replay the failing run and reproduce the exact crash."""
+    from keen_touchstone.adapters.otel_traces import read_spans_jsonl, trials_from_traces
+    from keen_touchstone.cassette import replay_run
+    from keen_touchstone.demo.replay_agent import (
+        DEMO_CONFIG_HASH,
+        demo_agent,
+        record_demo_runs,
+    )
+
+    with _CleanErrors():
+        console.print(
+            f"[dim]recording {invoices}×{runs_per_invoice} live runs of the buggy demo agent "
+            "(simulated tools, zero keys)…[/dim]"
+        )
+        results = record_demo_runs(out, invoices=invoices, runs_per_invoice=runs_per_invoice)
+        n_failed = sum(1 for _, _, ok in results if not ok)
+        console.print(
+            f"  recorded {len(results)} runs → {len(results) - n_failed} succeeded, "
+            f"[red]{n_failed} failed[/red] · cassettes in {out}/cassettes/"
+        )
+
+        ingested = trials_from_traces(read_spans_jsonl(out / "spans.jsonl"))
+        result = build_suite_result(
+            ingested.tasks, context="offline", model=ingested.model,
+            agent_config_hash=DEMO_CONFIG_HASH, task_key_source="declared_tag",
+        )
+        result.warnings.extend(ingested.warnings)
+        emit(
+            result, out / "report",
+            RunMeta(
+                source=f"recorded runs ({len(results)} cassettes)",
+                task_name="demo/reconcile-invoice", model=ingested.model,
+                scorer="recorded outcomes",
+            ),
+            console=console,
+        )
+
+        failed = next(((rid, inv) for rid, inv, ok in results if not ok), None)
+        if failed is None:
+            console.print("[yellow]no failing run this time — nothing to replay[/yellow]")
+            return
+        run_id, invoice = failed
+        cassette = out / "cassettes" / f"{run_id}.cassette.jsonl"
+        console.print(f"\n[bold]the flagship story:[/bold] replaying the failed run of {invoice} "
+                      f"[dim]({run_id[:12]}…)[/dim]")
+        report = replay_run(cassette, demo_agent)
+        style = "green" if report.faithful else "red"
+        console.print(f"  [{style}]{report.verdict}[/{style}]")
+        console.print(
+            f"\n[dim]replay it yourself:[/dim]\n  touchstone replay {cassette} "
+            "--entry keen_touchstone.demo.replay_agent:demo_agent"
+        )
+
+
 @main.group()
 def judge() -> None:
     """Judge exam & license: prove the judge before trusting its judgments.
