@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -97,6 +98,11 @@ class CassetteWriter:
         self.path = Path(path)
         self.run_id = run_id
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.exists() and self.path.stat().st_size > 0:
+            raise ValueError(
+                f"{self.path}: cassette already exists — one tape per run; a second recording "
+                "appended here would be a spliced tape (delete it or use a new run_id)"
+            )
         self._fh = open(self.path, "a")  # noqa: SIM115 — held across appends; class is the context manager
         self._n_written = 0
 
@@ -153,6 +159,25 @@ def read_cassette(path: str | Path) -> list[TraceEvent]:
                     f"(previous {last_step}) — reordered or spliced tape refused"
                 )
             last_step = data["step_id"]
+            # "fails loudly" must be true: JSON Schema's date-time format is
+            # non-asserting under a plain validator (independent round-3
+            # finding) — so timestamps are checked here, by parsing.
+            try:
+                datetime.fromisoformat(str(data["timestamp"]))
+            except ValueError as err:
+                raise ValueError(
+                    f"{path}:{lineno}: timestamp {data['timestamp']!r} is not a parseable "
+                    "date-time — tampered or corrupted tape"
+                ) from err
+            if data.get("metadata", {}).get("decision") == DECISION_CLOCK:
+                try:
+                    datetime.fromisoformat(str(data["output"]))
+                except ValueError as err:
+                    raise ValueError(
+                        f"{path}:{lineno}: __clock__ output {data['output']!r} is not a "
+                        "parseable date-time — corrupted tape (a replay would serve garbage "
+                        "time to the harness)"
+                    ) from err
             events.append(
                 TraceEvent(
                     run_id=data["run_id"],

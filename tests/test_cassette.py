@@ -316,9 +316,10 @@ def test_object_reprs_in_result_compare_modulo_addresses(tmp_path) -> None:
     assert "modulo memory addresses" in report.verdict
 
 
-def test_corrupted_clock_reports_tape_problem_not_agent_crash(tmp_path) -> None:
-    """[battery B] A garbage __clock__ value is a tape problem — Divergence,
-    never misclassified as the agent crashing."""
+def test_corrupted_clock_refused_at_read_time(tmp_path) -> None:
+    """[battery B + independent F6] A garbage __clock__ value is refused when
+    the tape is READ (with its line number) — never misclassified as the
+    agent crashing, never served to the harness."""
 
     def agent(io, task_input):
         return {"t": io.now().isoformat()}
@@ -333,10 +334,102 @@ def test_corrupted_clock_reports_tape_problem_not_agent_crash(tmp_path) -> None:
             data["output"] = "not-a-timestamp"
         doctored.append(json.dumps(data))
     cassette.write_text("\n".join(doctored) + "\n")
-    report = replay_run(cassette, agent)
+    with pytest.raises(ValueError, match=r"__clock__ output .* not a parseable"):
+        replay_run(cassette, agent)
+
+
+def test_tampered_timestamp_field_refused_at_read(tmp_path) -> None:
+    """[independent F6a] JSON Schema's date-time format is non-asserting —
+    'fails loudly' must therefore be enforced by parsing, per line."""
+    with RecordingIO(tmp_path, task_input={}) as io:
+        io.finish("x")
+    cassette = next((tmp_path / "cassettes").glob("*.jsonl"))
+    lines = [json.loads(x) for x in cassette.read_text().splitlines()]
+    lines[0]["timestamp"] = "NOT-A-DATE-TIME"
+    cassette.write_text("\n".join(json.dumps(d) for d in lines) + "\n")
+    with pytest.raises(ValueError, match=r"timestamp .* not a parseable"):
+        read_cassette(cassette)
+
+
+def test_changed_input_to_exotic_type_is_divergence_not_false_faithful(tmp_path) -> None:
+    """[independent F5b, Critical] A recorded crash + a replay harness that
+    changes an input to a previously-crashy exotic type must be DIVERGED at
+    the step — never blessed as 'same failure' via an engine-error message
+    coincidence."""
+
+    def recorded_agent(io, task_input):
+        io.tool_call("t", {"key": "plain"}, lambda x: "v")
+        raise TypeError("'<' not supported between instances of 'str' and 'int'")
+
+    rec = RecordingIO(tmp_path, task_input={})
+    with pytest.raises(TypeError), rec as io:
+        recorded_agent(io, {})
+
+    def changed_agent(io, task_input):
+        io.tool_call("t", {1: "a", "b": "c"}, lambda x: "v")  # changed input, mixed keys
+        raise TypeError("'<' not supported between instances of 'str' and 'int'")
+
+    cassette = tmp_path / "cassettes" / f"{rec.run_id}.cassette.jsonl"
+    report = replay_run(cassette, changed_agent)
     assert not report.faithful
-    assert report.divergence is not None
-    assert "tape problem" in report.divergence
+    assert report.divergence is not None and "step 1" in report.divergence
+
+
+def test_json_semantics_equivalences_are_intentional() -> None:
+    """[independent F4] canonical() matches at JSON semantics BY DESIGN:
+    int-keys/str-keys and tuples/lists compare equal — the seam carries
+    JSON-shaped API payloads, where these are indistinguishable on the wire.
+    This test is the documentation."""
+    from keen_touchstone.cassette.replay import canonical
+
+    assert canonical({1: "a"}) == canonical({"1": "a"})
+    assert canonical((1, 2)) == canonical([1, 2])
+    assert canonical({"s": {"b", "a"}}) == canonical({"s": ["a", "b"]})
+
+
+def test_seam_after_finish_never_executes_the_live_call(tmp_path) -> None:
+    """[independent E] the dangerous half of post-finish taping is the OFF-TAPE
+    side effect — the live call must not run at all."""
+    fired = {"n": 0}
+
+    def live(x):
+        fired["n"] += 1
+        return "boom"
+
+    with RecordingIO(tmp_path, task_input={}) as io:
+        io.finish("done")
+    with pytest.raises(ValueError, match="already finished"):
+        io.tool_call("t", {"x": 1}, live)
+    assert fired["n"] == 0
+
+
+def test_second_recording_to_same_run_id_refused_at_write(tmp_path) -> None:
+    """[independent, double-record] a second tape for the same run_id fails
+    fast at WRITE time, not only later at read."""
+    with RecordingIO(tmp_path, task_input={}, run_id="fixed") as io:
+        io.finish(1)
+    with pytest.raises(ValueError, match="already exists"):
+        RecordingIO(tmp_path, task_input={}, run_id="fixed")
+
+
+def test_pre_seam_crash_is_flagged_as_invocation_problem(tmp_path) -> None:
+    """[independent B corollary] an entry that dies before touching the seam
+    reads as an invocation problem, not a harness divergence."""
+
+    def agent(io, task_input):
+        io.tool_call("t", {"x": 1}, lambda x: "v")
+        return "ok"
+
+    with RecordingIO(tmp_path, task_input={}) as io:
+        io.finish(agent(io, {}))
+    cassette = next((tmp_path / "cassettes").glob("*.jsonl"))
+
+    def broken_entry(io, task_input):
+        raise RuntimeError("exploded before any io.* call")
+
+    report = replay_run(cassette, broken_entry)
+    assert not report.faithful
+    assert "before reaching the seam" in report.verdict
 
 
 def test_recording_after_finish_is_a_clear_error(tmp_path) -> None:

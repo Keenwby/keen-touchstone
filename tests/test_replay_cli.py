@@ -72,6 +72,20 @@ def test_cli_replay_entry_validation(demo_out) -> None:
     ])
     assert not_callable.exit_code == 2
     assert "not callable" in not_callable.output
+    # [independent A] import failures are usage errors (exit 2), never exit 1
+    # (which CI reads as "diverged") and never raw tracebacks
+    bad_module = runner.invoke(main, ["replay", cassette, "--entry", "no_such_module_xyz:fn"])
+    assert bad_module.exit_code == 2
+    assert "cannot import" in bad_module.output
+    assert "Traceback" not in bad_module.output
+
+
+def test_cli_replay_demo_rejects_nonpositive_counts(tmp_path) -> None:
+    # [independent D] --invoices 0 must be a usage error, not a confusing
+    # missing-spans.jsonl crash
+    result = CliRunner().invoke(main, ["replay-demo", "--invoices", "0", "--out", str(tmp_path)])
+    assert result.exit_code == 2
+    assert "not in the range" in result.output or "Invalid value" in result.output
 
 
 def test_join_across_three_artifacts(demo_out) -> None:

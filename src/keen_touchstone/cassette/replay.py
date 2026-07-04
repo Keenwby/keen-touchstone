@@ -242,7 +242,22 @@ def replay_run(cassette_path: str | Path, entry_fn) -> ReplayReport:
         masked_match = True
     faithful = divergence is None and outcome_matches and not unconsumed
 
-    if divergence is not None:
+    taped_seam_events = len(io._llm) + len(io._tool) + len(io._clock) + len(io._decisions)
+    crashed_pre_seam = (
+        not replayed_final.get("ok")
+        and divergence is None
+        and io.steps_replayed == 0
+        and taped_seam_events > 0
+    )
+    if crashed_pre_seam:
+        faithful = False
+        err = replayed_final["error"]
+        verdict = (
+            f"DIVERGED — the entry function crashed before reaching the seam "
+            f"({err['type']}: {err['message']}) — likely a wrong --entry or invocation "
+            "problem, not a harness divergence"
+        )
+    elif divergence is not None:
         verdict = f"DIVERGED — {divergence}"
     elif not outcome_matches:
         verdict = (

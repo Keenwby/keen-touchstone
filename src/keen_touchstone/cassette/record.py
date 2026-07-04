@@ -72,7 +72,18 @@ class RecordingIO:
 
     # ------------------------------------------------------------- the seam
 
+    def _ensure_recording(self) -> None:
+        """Guard BEFORE any live call: a seam call after finish() must not
+        execute the real side effect and then fail to tape it (independent
+        round-3 finding — the off-tape side effect is the dangerous half)."""
+        if self._finished:
+            raise ValueError(
+                "recording already finished — io.* calls after finish() cannot be taped "
+                "(and the live call was NOT executed)"
+            )
+
     def llm_call(self, prompt: Any, model_id: str, call_fn) -> Any:
+        self._ensure_recording()
         output = call_fn(prompt)
         step = self._record("llm_call", prompt, output, {"model_id": model_id})
         self._models_seen.append(model_id)
@@ -90,6 +101,7 @@ class RecordingIO:
         return output
 
     def tool_call(self, tool_id: str, tool_input: Any, call_fn) -> Any:
+        self._ensure_recording()
         output = call_fn(tool_input)
         step = self._record("tool_call", tool_input, output, {"tool_id": tool_id})
         self._spans.append(
@@ -110,6 +122,7 @@ class RecordingIO:
         replay is deterministic. Returns the value unchanged when recording."""
         if name.startswith("__"):
             raise ValueError(f"decision name {name!r} is reserved")
+        self._ensure_recording()
         self._record("decision", name, value, {"decision": name})
         return value
 

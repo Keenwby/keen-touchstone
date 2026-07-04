@@ -205,7 +205,14 @@ def _load_entry(entry: str):
     if ":" not in entry:
         raise click.UsageError(f"--entry must be module:function, got {entry!r}")
     module_name, fn_name = entry.split(":", 1)
-    module = importlib.import_module(module_name)
+    try:
+        module = importlib.import_module(module_name)
+    except ImportError as err:
+        raise click.UsageError(f"cannot import module {module_name!r}: {err}") from err
+    except Exception as err:  # import-time side effects — a usage problem, not a divergence
+        raise click.UsageError(
+            f"importing {module_name!r} raised {type(err).__name__}: {err}"
+        ) from err
     fn = getattr(module, fn_name, None)
     if fn is None:
         raise click.UsageError(f"{module_name!r} has no attribute {fn_name!r}")
@@ -245,8 +252,8 @@ def replay(cassette: str, entry: str) -> None:
 
 
 @main.command("replay-demo")
-@click.option("--invoices", type=int, default=6, show_default=True)
-@click.option("--runs-per-invoice", type=int, default=3, show_default=True)
+@click.option("--invoices", type=click.IntRange(min=1), default=6, show_default=True)
+@click.option("--runs-per-invoice", type=click.IntRange(min=1), default=3, show_default=True)
 @click.option("--out", type=click.Path(path_type=Path), default=Path("out/replay-demo"), show_default=True)
 def replay_demo(invoices: int, runs_per_invoice: int, out: Path) -> None:
     """Keyless end-to-end: record a buggy agent live → pass^k report from the
