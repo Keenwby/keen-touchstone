@@ -10,6 +10,16 @@
 - **Demo** (`touchstone replay-demo`, keyless): a deterministic harness bug — the ledger returns `"1,130.00"` and the scaffold's `float()` crashes (the model did nothing wrong; the harness did). Record 18 runs → pass^k report from the recorded spans → replay the failing run: same `ValueError`, zero network. Failures designed by trigger, not probability (Phase 2 demo lesson).
 - **Honest limits stated everywhere**: harness-logic re-execution, NOT model reproducibility; only seam-routed calls are taped; async and zero-code-change interception deferred.
 
+### Review round 3 (2026-07-04) — self-executed attack battery, tagged `[battery …]`
+
+**Process honesty:** the two independent skeptic agents for this round died to a session usage limit before reporting. The attack list written for them was executed by the builder as runnable probe scripts instead (same reproduce-with-code discipline, weaker independence). **An independent adversarial pass over Phase 3 is still owed** and should run before any public release. Findings (5 reproduced, all fixed with regressions):
+
+- `[battery A1, Major]` **The flight recorder crashed the plane**: a mixed-type-key dict (`{1: "a", "b": 2}`) as a call input raised TypeError inside the WRITER (sort_keys comparison) — killing the run and taping the blame onto the agent. Fixed: `jsonable()` normalizer (dict keys → strings, applied identically at record and match time).
+- `[battery A2, Major]` **Sets caused cross-process false divergence**: taped via `str(set)`, whose ordering is PYTHONHASHSEED-dependent — record in one process, replay in another, spurious DIVERGED. Fixed: sets/frozensets tape as deterministically sorted lists.
+- `[battery A3, Major]` **Faithful replays falsely diverged on memory addresses**: a non-serializable object in the result carries `0x…` in its repr, which can never match across processes. Fixed: final-outcome reconciliation compares modulo addresses, and says so in the verdict when it mattered.
+- `[battery B, Minor]` A hand-corrupted `__clock__` value was misclassified as the agent crashing. Fixed: named Divergence ("tape problem, not an agent crash").
+- `[battery C+D, Minor]` Wrong-arity `--entry` functions now fail as usage errors (not fake DIVERGED verdicts); recording after `finish()` gets a plain-language refusal instead of "I/O operation on closed file".
+
 ## 0.2.0 (Phase 2: the judge-calibration gate, built 2026-07-03)
 
 **The second moat, delivered:** the field computes judge-vs-human agreement; KeenTouchstone gates on it — in CI (`judge gate`, exit 1) and in the data path (unlicensed judges' verdicts are refused at ingest).

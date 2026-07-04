@@ -26,6 +26,7 @@ README, and in the thesis; pretending otherwise is how replay tools lie.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -36,6 +37,7 @@ from .io import (
     DECISION_FINAL,
     DECISION_TASK_INPUT,
     TraceEvent,
+    jsonable,
     read_cassette,
 )
 from .record import error_payload
@@ -50,7 +52,16 @@ class CassetteExhausted(Exception):
 
 
 def canonical(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, default=str)
+    """Same normalization as the writer (jsonable) — record and replay must
+    serialize identically or matching is meaningless."""
+    return json.dumps(jsonable(value), sort_keys=True, default=str)
+
+
+_ADDRESS_RE = re.compile(r"0x[0-9a-f]{6,}")
+
+
+def _mask_addresses(text: str) -> str:
+    return _ADDRESS_RE.sub("0xADDR", text)
 
 
 def _diff_snippet(expected: str, got: str, context: int = 40) -> str:
@@ -144,7 +155,13 @@ class ReplayIO:
 
     def now(self) -> datetime:
         ev = self._next(self._clock, "clock read (io.now())")
-        return datetime.fromisoformat(str(ev.output))
+        try:
+            return datetime.fromisoformat(str(ev.output))
+        except ValueError as err:
+            raise Divergence(
+                f"step {ev.step_id}: taped clock value {ev.output!r} is not a timestamp — "
+                "corrupted or hand-edited tape (this is a tape problem, not an agent crash)"
+            ) from err
 
     # ------------------------------------------------------------- plumbing
 
@@ -214,7 +231,15 @@ def replay_run(cassette_path: str | Path, entry_fn) -> ReplayReport:
         replayed_final = {"ok": False, "error": error_payload(err)}
 
     unconsumed = io.unconsumed()
-    outcome_matches = canonical(replayed_final) == canonical(io.recorded_final)
+    rec_c, got_c = canonical(io.recorded_final), canonical(replayed_final)
+    outcome_matches = rec_c == got_c
+    masked_match = False
+    if not outcome_matches and _mask_addresses(rec_c) == _mask_addresses(got_c):
+        # Non-serializable objects carry process-local memory addresses in
+        # their reprs; identical-modulo-address outcomes are the same value
+        # as far as any tape can tell. Said out loud in the verdict.
+        outcome_matches = True
+        masked_match = True
     faithful = divergence is None and outcome_matches and not unconsumed
 
     if divergence is not None:
@@ -236,6 +261,11 @@ def replay_run(cassette_path: str | Path, entry_fn) -> ReplayReport:
             f"{replayed_final['error']['message']})"
         )
         verdict = f"REPLAY FAITHFUL — {outcome}, {io.steps_replayed} step(s), zero network"
+        if masked_match:
+            verdict += (
+                " (non-serializable object reprs in the result compared modulo memory "
+                "addresses — return JSON-able results for exact reconciliation)"
+            )
 
     return ReplayReport(
         faithful=faithful,

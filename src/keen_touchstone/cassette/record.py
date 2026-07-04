@@ -128,8 +128,8 @@ class RecordingIO:
     def _close_out(self, final: dict[str, Any]) -> None:
         if self._finished:
             return
-        self._finished = True
         self._record("decision", DECISION_FINAL, final, {"decision": DECISION_FINAL})
+        self._finished = True  # after taping __final__ — the guard blocks only post-finish calls
         self._writer.close()
         self._emit_spans(ok=bool(final.get("ok")))
 
@@ -147,6 +147,11 @@ class RecordingIO:
     # ------------------------------------------------------------ internals
 
     def _record(self, kind: str, input_: Any, output: Any, metadata: dict[str, Any]) -> int:
+        if self._finished:
+            raise ValueError(
+                "recording already finished — io.* calls after finish() cannot be taped "
+                "(and would make the cassette lie about the run)"
+            )
         step = self._step
         self._step += 1
         self._writer.append(

@@ -61,6 +61,17 @@ def test_cli_replay_entry_validation(demo_out) -> None:
     ])
     assert missing.exit_code == 2
     assert "no attribute" in missing.output
+    # [battery C] wrong arity is a usage error, not a fake DIVERGED verdict
+    wrong_sig = runner.invoke(main, [
+        "replay", cassette, "--entry", "keen_touchstone.demo.replay_agent:scripted_llm",
+    ])
+    assert wrong_sig.exit_code == 2
+    assert "must accept (io, task_input)" in wrong_sig.output
+    not_callable = runner.invoke(main, [
+        "replay", cassette, "--entry", "keen_touchstone.demo.replay_agent:DEMO_CONFIG_HASH",
+    ])
+    assert not_callable.exit_code == 2
+    assert "not callable" in not_callable.output
 
 
 def test_join_across_three_artifacts(demo_out) -> None:

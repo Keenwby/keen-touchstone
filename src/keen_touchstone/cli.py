@@ -209,6 +209,16 @@ def _load_entry(entry: str):
     fn = getattr(module, fn_name, None)
     if fn is None:
         raise click.UsageError(f"{module_name!r} has no attribute {fn_name!r}")
+    if not callable(fn):
+        raise click.UsageError(f"{entry!r} is not callable")
+    import inspect as _inspect
+
+    try:
+        _inspect.signature(fn).bind("io", "task_input")
+    except TypeError as err:
+        raise click.UsageError(
+            f"entry function must accept (io, task_input); {entry!r} does not ({err})"
+        ) from err
     return fn
 
 

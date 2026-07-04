@@ -260,6 +260,94 @@ def test_wrong_identity_diverges(tmp_path) -> None:
     assert "different model/tool" in (report.divergence or "")
 
 
+# -------------------------------------------- round-3 attack-battery regressions
+
+
+def test_mixed_key_dict_input_does_not_crash_the_recorder(tmp_path) -> None:
+    """[battery A1] The flight recorder must never crash the plane: mixed-type
+    dict keys used to raise TypeError inside the writer and blame the agent."""
+
+    def agent(io, task_input):
+        return io.tool_call("t", {1: "a", "b": 2}, lambda x: "ok")
+
+    with RecordingIO(tmp_path, task_input={}) as io:
+        io.finish(agent(io, {}))
+    report = replay_run(
+        next((tmp_path / "cassettes").glob("*.jsonl")), agent
+    )
+    assert report.faithful, report.verdict
+
+
+def test_set_inputs_canonicalize_deterministically(tmp_path) -> None:
+    """[battery A2] Sets are taped as sorted lists — str(set) ordering is
+    PYTHONHASHSEED-dependent across processes and caused false divergence."""
+    from keen_touchstone.cassette.io import jsonable
+
+    assert jsonable({"items": {"gamma", "alpha", "beta"}}) == {
+        "items": ["alpha", "beta", "gamma"]
+    }
+    assert jsonable(frozenset([3, 1, 2])) == [1, 2, 3]
+
+    def agent(io, task_input):
+        return io.tool_call("t", {"tags": {"b", "a"}}, lambda x: sorted(x["tags"]))
+
+    with RecordingIO(tmp_path, task_input={}) as io:
+        io.finish(agent(io, {}))
+    report = replay_run(next((tmp_path / "cassettes").glob("*.jsonl")), agent)
+    assert report.faithful, report.verdict
+
+
+def test_object_reprs_in_result_compare_modulo_addresses(tmp_path) -> None:
+    """[battery A3] A faithful replay whose result holds a non-serializable
+    object must not falsely diverge on the memory address in its repr —
+    and the verdict says the comparison was masked."""
+
+    class Opaque:
+        pass
+
+    def agent(io, task_input):
+        io.tool_call("t", {"k": 1}, lambda x: "v")
+        return {"handle": Opaque()}
+
+    with RecordingIO(tmp_path, task_input={}) as io:
+        io.finish(agent(io, {}))
+    report = replay_run(next((tmp_path / "cassettes").glob("*.jsonl")), agent)
+    assert report.faithful, report.verdict
+    assert "modulo memory addresses" in report.verdict
+
+
+def test_corrupted_clock_reports_tape_problem_not_agent_crash(tmp_path) -> None:
+    """[battery B] A garbage __clock__ value is a tape problem — Divergence,
+    never misclassified as the agent crashing."""
+
+    def agent(io, task_input):
+        return {"t": io.now().isoformat()}
+
+    with RecordingIO(tmp_path, task_input={}) as io:
+        io.finish(agent(io, {}))
+    cassette = next((tmp_path / "cassettes").glob("*.jsonl"))
+    doctored = []
+    for line in cassette.read_text().splitlines():
+        data = json.loads(line)
+        if data["metadata"].get("decision") == "__clock__":
+            data["output"] = "not-a-timestamp"
+        doctored.append(json.dumps(data))
+    cassette.write_text("\n".join(doctored) + "\n")
+    report = replay_run(cassette, agent)
+    assert not report.faithful
+    assert report.divergence is not None
+    assert "tape problem" in report.divergence
+
+
+def test_recording_after_finish_is_a_clear_error(tmp_path) -> None:
+    """[battery D] io.* after finish() gets a plain-language refusal, not
+    'I/O operation on closed file'."""
+    with RecordingIO(tmp_path, task_input={}) as io:
+        io.finish("done")
+    with pytest.raises(ValueError, match="already finished"):
+        io.llm_call("late", "m", lambda p: "x")
+
+
 def test_reserved_decision_names_rejected(tmp_path) -> None:
     task = {"invoice_id": "INV-001"}
     with RecordingIO(tmp_path, task_input=task) as io:

@@ -31,6 +31,31 @@ DECISION_CLOCK = "__clock__"
 DECISION_FINAL = "__final__"
 
 
+def jsonable(value: Any) -> Any:
+    """Normalize a value for taping/matching — deterministically.
+
+    Found by the round-3 attack battery: raw ``json.dumps(sort_keys=True,
+    default=str)`` (a) crashes on mixed-type dict keys (the RECORDER killing
+    the run and blaming the agent), and (b) serializes sets via ``str()``,
+    whose ordering is PYTHONHASHSEED-dependent — record in one process,
+    replay in another, false divergence. So: dict keys become strings before
+    sorting; sets/frozensets become lists sorted by their canonical form;
+    tuples become lists (JSON does that anyway); everything else falls back
+    to ``str()``.
+    """
+    if isinstance(value, dict):
+        return {str(k): jsonable(v) for k, v in value.items()}
+    if isinstance(value, (set, frozenset)):
+        return sorted(
+            (jsonable(v) for v in value), key=lambda x: json.dumps(x, sort_keys=True, default=str)
+        )
+    if isinstance(value, (list, tuple)):
+        return [jsonable(v) for v in value]
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
+
+
 @dataclass(frozen=True)
 class TraceEvent:
     run_id: str
@@ -80,7 +105,7 @@ class CassetteWriter:
             raise ValueError(
                 f"event run_id {event.run_id!r} does not match cassette run_id {self.run_id!r}"
             )
-        data = event.to_dict()
+        data = jsonable(event.to_dict())
         _validate_event_dict(data, f"{self.path} (while recording step {event.step_id})")
         self._fh.write(json.dumps(data, sort_keys=True, default=str) + "\n")
         self._fh.flush()
