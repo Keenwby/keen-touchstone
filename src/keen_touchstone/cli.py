@@ -323,6 +323,18 @@ def _print_watch(report) -> None:
         console.print(f"  [dim]note: {warning}[/dim]")
 
 
+@main.command("online-demo")
+@click.option("--out", type=click.Path(path_type=Path), default=Path("out/online-demo"), show_default=True)
+@click.option("--seed", type=int, default=2026, show_default=True)
+def online_demo(out: Path, seed: int) -> None:
+    """Keyless end-to-end: unlabeled drifting traffic → derived task identity
+    → windowed pass^k with a confident breach → paired regression verdict."""
+    from keen_touchstone.demo.online_demo import run_online_demo
+
+    with _CleanErrors():
+        run_online_demo(out, seed=seed, console=console)
+
+
 @main.command("compare")
 @click.argument("baseline", type=click.Path(exists=True))
 @click.argument("candidate", type=click.Path(exists=True))

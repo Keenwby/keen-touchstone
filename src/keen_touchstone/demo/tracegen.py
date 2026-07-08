@@ -37,6 +37,9 @@ DEMO_TASK_INPUTS: dict[str, str] = {
     "ops/log-triage": "Triage the error spike in service svc-{c} around 2026-07-{d:02d}",
     "ops/incident-summary": "Write a postmortem summary for incident INC-{n}",
     "research/competitor-scan": "Find the top competitor mentions for product P{c} since 2026-06-{d:02d}",
+    "support/subscription-cancel": "Cancel subscription SUB-{n} for account C{c} effective 2026-07-{d:02d}",
+    "ops/capacity-report": "Prepare the weekly capacity report for cluster cl-{c}",
+    "research/pricing-scan": "Compare pricing pages of vendor V{c} against our plan {n}",
 }
 
 
