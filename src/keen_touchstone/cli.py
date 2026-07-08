@@ -323,6 +323,65 @@ def _print_watch(report) -> None:
         console.print(f"  [dim]note: {warning}[/dim]")
 
 
+@main.command("compare")
+@click.argument("baseline", type=click.Path(exists=True))
+@click.argument("candidate", type=click.Path(exists=True))
+@click.option("--at-k", type=int, default=None, help="k for the paired pass^k comparison (default: half the shared trial floor).")
+@click.option("--alpha", type=float, default=0.05, show_default=True)
+@click.option("--seed", type=int, default=2026, show_default=True)
+@click.option("--resamples", type=int, default=10000, show_default=True)
+def compare_cmd(baseline: str, candidate: str, at_k: int | None, alpha: float, seed: int, resamples: int) -> None:
+    """Paired comparison of two aggregate.json files on their SHARED tasks.
+
+    Exit 1 on SIGNIFICANT_REGRESSION (for CI); improvement/noise exit 0.
+    """
+    from keen_touchstone.online import compare, load_aggregate_tasks
+
+    with _CleanErrors():
+        tasks_a, _ = load_aggregate_tasks(baseline)
+        tasks_b, _ = load_aggregate_tasks(candidate)
+        result = compare(tasks_a, tasks_b, at_k=at_k, alpha=alpha, seed=seed, n_resamples=resamples)
+
+    style = {"SIGNIFICANT_REGRESSION": "red", "SIGNIFICANT_IMPROVEMENT": "green", "NOISE": "yellow"}[result.verdict]
+    console.print()
+    console.rule("[bold]compare — candidate vs baseline (paired)[/bold]")
+    console.print(
+        f"  [{style}]{result.verdict}[/{style}] at pass^{result.k}: mean delta "
+        f"{result.mean_delta:+.3f} [dim]\\[{result.ci_low:+.3f}, {result.ci_high:+.3f}] 95% CI[/dim], "
+        f"p={result.p_value:.4f} [dim]({result.method}, {result.n_shared} shared tasks)[/dim]"
+    )
+    if result.n_only_baseline or result.n_only_candidate:
+        console.print(
+            f"  [dim]unpaired tasks dropped: {result.n_only_baseline} only-baseline, "
+            f"{result.n_only_candidate} only-candidate[/dim]"
+        )
+    if result.underpowered:
+        console.print("  [yellow]UNDERPOWERED_NEED_MORE_N[/yellow]")
+    for note in result.notes:
+        console.print(f"  [dim]note: {note}[/dim]")
+    worst = sorted(result.deltas, key=lambda t: t.delta)[:3]
+    for t in worst:
+        console.print(f"  [dim]{t.task_key}: {t.pass_hat_a:.2f} → {t.pass_hat_b:.2f} ({t.delta:+.2f})[/dim]")
+    if result.verdict == "SIGNIFICANT_REGRESSION":
+        raise SystemExit(1)
+
+
+@main.command("slo-gate")
+@click.argument("aggregate", type=click.Path(exists=True))
+@click.option("--slo", required=True, help='e.g. "0.6@4" = pass^4 must be ≥ 60%.')
+@click.option("--strict", is_flag=True, help="Fail on the point estimate, not only on a confident breach.")
+def slo_gate_cmd(aggregate: str, slo: str, strict: bool) -> None:
+    """Release gate: exit 1 when the aggregate confidently breaches the SLO."""
+    from keen_touchstone.online import slo_gate
+
+    with _CleanErrors():
+        result = slo_gate(aggregate, slo=slo, strict=strict)
+    style = {"pass": "green", "warning": "yellow", "breach": "red"}[result.level]
+    console.print(f"[{style}]{result.message}[/{style}]")
+    if not result.ok:
+        raise SystemExit(1)
+
+
 def _load_entry(entry: str):
     import importlib
 
