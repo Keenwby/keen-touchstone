@@ -242,6 +242,87 @@ def _build_ingest_result(ingested, k_max, headline_k, resamples, seed, task_key_
     return result
 
 
+@main.command()
+@click.argument("traces", type=click.Path(exists=True))
+@click.option("--window", type=click.IntRange(min=2), default=30, show_default=True, help="Runs per tumbling window.")
+@click.option("--slo", required=True, help='Reliability red line, e.g. "0.6@4" = pass^4 must stay ≥ 60%.')
+@click.option("--signature-strategy", "sig_strategy", type=click.Choice(["declared", "template", "tool-sequence"]), default="declared", show_default=True)
+@click.option("--threshold", type=float, default=1.0, show_default=True)
+@click.option("--outcome-regex", default=None)
+@click.option("--out", "out_json", type=click.Path(path_type=Path), default=None, help="Also write the window series as JSON.")
+@click.option("--follow", is_flag=True, help="Keep re-scanning the file (Ctrl-C to stop).")
+@click.option("--every", type=float, default=30.0, show_default=True, help="Re-scan interval for --follow, seconds.")
+@click.option("--seed", type=int, default=2026, show_default=True)
+def watch(traces: str, window: int, slo: str, sig_strategy: str, threshold: float,
+          outcome_regex: str | None, out_json: Path | None, follow: bool, every: float,
+          seed: int) -> None:
+    """Continuous reliability: tumbling windows over a trace stream, with a
+    two-level SLO alert (confident breach = exit 1)."""
+    import json as json_mod
+    import time as time_mod
+    from dataclasses import asdict
+
+    from keen_touchstone.adapters.otel_traces import read_spans_jsonl
+    from keen_touchstone.online import watch_stream
+
+    def one_pass():
+        from keen_touchstone.adapters.signatures import STRATEGIES
+
+        strategy = STRATEGIES[sig_strategy]() if sig_strategy != "declared" else None
+        with _CleanErrors():
+            report = watch_stream(
+                read_spans_jsonl(traces), window_size=window, slo=slo,
+                strategy=strategy, threshold=threshold, outcome_regex=outcome_regex, seed=seed,
+            )
+        _print_watch(report)
+        if out_json is not None:
+            out_json.parent.mkdir(parents=True, exist_ok=True)
+            out_json.write_text(json_mod.dumps(asdict(report) | {
+                "windows": [asdict(w) for w in report.windows]}, indent=2) + "\n")
+            console.print(f"[dim]wrote[/dim] {out_json}")
+        return report
+
+    report = one_pass()
+    while follow:
+        time_mod.sleep(every)
+        report = one_pass()
+    if report.breached:
+        raise SystemExit(1)
+
+
+_WATCH_GLYPHS = {"ok": "[green]✓ ok[/green]", "warning": "[yellow]⚠ warning[/yellow]",
+                 "breach": "[red]✗ BREACH[/red]", "insufficient_n": "[dim]… insufficient n[/dim]",
+                 "pending": "[dim]· pending[/dim]", "no_data": "[dim]— no data[/dim]"}
+
+
+def _print_watch(report) -> None:
+    from rich.table import Table
+
+    console.print()
+    console.rule(f"[bold]watch — SLO pass^{report.slo_k} ≥ {report.slo_value}[/bold]")
+    table = Table(show_header=True)
+    for col, justify in (("win", "right"), ("time", "left"), ("runs", "right"),
+                         ("tasks", "right"), ("pass^k", "right"), ("95% CI", "right"),
+                         ("status", "left")):
+        table.add_column(col, justify=justify)
+    for w in report.windows:
+        table.add_row(
+            str(w.index),
+            (w.start_time or "?")[11:16] + "–" + (w.end_time or "?")[11:16],
+            str(w.n_runs), str(w.n_tasks),
+            f"{w.pass_hat_k:.2f}" if w.pass_hat_k is not None else "—",
+            f"[{w.ci_low:.2f}, {w.ci_high:.2f}]" if w.ci_low is not None else "—",
+            _WATCH_GLYPHS.get(w.status, w.status),
+        )
+    console.print(table)
+    latest = next((w for w in reversed(report.windows) if w.status != "pending"), None)
+    if latest is not None and latest.detail:
+        style = "red" if latest.status == "breach" else "yellow"
+        console.print(f"  [{style}]{latest.detail}[/{style}]")
+    for warning in report.warnings:
+        console.print(f"  [dim]note: {warning}[/dim]")
+
+
 def _load_entry(entry: str):
     import importlib
 

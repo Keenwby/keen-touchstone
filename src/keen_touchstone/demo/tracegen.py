@@ -101,8 +101,8 @@ def gen_spans_labeled(
     - ``include_signatures=False`` omits harness.task_signature (the unlabeled
       traffic that derived identity exists for);
     - ``drift={"task": sig, "after": k, "p": new_p}`` degrades one task's
-      success probability from its k-th run onward (trigger-designed, not
-      probabilistic — the Phase 2 demo lesson).
+      success probability from its k-th run onward ("*" degrades every task) —
+      trigger-designed, not probabilistic (the Phase 2 demo lesson).
     """
     tasks = tasks if tasks is not None else DEMO_TRACE_TASKS
     rng = random.Random(seed)
@@ -121,7 +121,7 @@ def gen_spans_labeled(
             local_index[signature] = idx + 1
             if (
                 drift is not None
-                and signature == drift["task"]
+                and drift["task"] in (signature, "*")
                 and idx >= drift["after"]
             ):
                 p = drift["p"]
