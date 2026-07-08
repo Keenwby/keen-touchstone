@@ -28,6 +28,17 @@ DEMO_TRACE_TASKS: dict[str, float] = {
 
 DEMO_MODEL = "demo/agent-model"
 
+# realistic per-task input templates — material for derived task identity
+# (ids vary per run; derived DETERMINISTICALLY from the run counter so adding
+# them consumes NO shared-rng draws — seeded outcome tests stay stable)
+DEMO_TASK_INPUTS: dict[str, str] = {
+    "support/refund-flow": "Refund order #{n} for customer C{c} and email confirmation to user{c}@example.com",
+    "support/address-change": "Update the shipping address for customer C{c} to {n} Main Street",
+    "ops/log-triage": "Triage the error spike in service svc-{c} around 2026-07-{d:02d}",
+    "ops/incident-summary": "Write a postmortem summary for incident INC-{n}",
+    "research/competitor-scan": "Find the top competitor mentions for product P{c} since 2026-06-{d:02d}",
+}
+
 
 def gen_spans(
     seed: int = 2026,
@@ -61,19 +72,67 @@ def gen_spans_with_truth(
 ) -> tuple[list[dict[str, Any]], dict[str, bool]]:
     """Like gen_spans, but also returns the latent truth (trace_id → really
     succeeded) — the test/demo oracle that production traffic never has."""
+    spans, labels = gen_spans_labeled(
+        seed=seed, tasks=tasks, runs_per_task=runs_per_task, model=model,
+        unsigned_runs=unsigned_runs, config_hash=config_hash,
+        include_outcomes=include_outcomes,
+    )
+    return spans, {tid: lab["ok"] for tid, lab in labels.items()}
+
+
+def gen_spans_labeled(
+    seed: int = 2026,
+    tasks: dict[str, float] | None = None,
+    runs_per_task: int = 12,
+    model: str = DEMO_MODEL,
+    unsigned_runs: int = 2,
+    config_hash: str | None = None,
+    include_outcomes: bool = True,
+    include_signatures: bool = True,
+    drift: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any]]]:
+    """Full-truth variant: trace_id → {"ok", "task", "start_time"}.
+
+    New Phase 4 material, all derived WITHOUT extra shared-rng draws:
+    - root spans carry a realistic ``input.messages`` text (per-task template,
+      ids varied by the run counter) — food for derived task identity;
+    - root spans carry ``start_time`` interleaving tasks round-robin in time,
+      so the stream reads like production traffic (watch sorts by it);
+    - ``include_signatures=False`` omits harness.task_signature (the unlabeled
+      traffic that derived identity exists for);
+    - ``drift={"task": sig, "after": k, "p": new_p}`` degrades one task's
+      success probability from its k-th run onward (trigger-designed, not
+      probabilistic — the Phase 2 demo lesson).
+    """
     tasks = tasks if tasks is not None else DEMO_TRACE_TASKS
     rng = random.Random(seed)
     config = config_hash or f"democfg{seed:05d}"
     spans: list[dict[str, Any]] = []
-    truth: dict[str, bool] = {}
+    labels: dict[str, dict[str, Any]] = {}
+    task_order = list(tasks)
     run_no = 0
+    local_index: dict[str, int] = {sig: 0 for sig in tasks}
 
     def add_run(signature: str | None, p: float) -> None:
         nonlocal run_no
         run_no += 1
+        idx = local_index.get(signature, 0)
+        if signature is not None:
+            local_index[signature] = idx + 1
+            if (
+                drift is not None
+                and signature == drift["task"]
+                and idx >= drift["after"]
+            ):
+                p = drift["p"]
         trace_id = f"{rng.getrandbits(64):016x}{run_no:016x}"
         succeeded = rng.random() < p
-        truth[trace_id] = succeeded
+        # interleave tasks round-robin in TIME without touching rng order:
+        # minute offset = local_run_index * n_tasks + task_position
+        task_pos = task_order.index(signature) if signature in task_order else len(task_order)
+        minute = idx * (len(task_order) + 1) + task_pos
+        start_time = _minute_to_iso(minute)
+        labels[trace_id] = {"ok": succeeded, "task": signature, "start_time": start_time}
         step = 0
 
         def span(span_id: str, parent: str | None, op: str, extra: dict[str, Any]) -> None:
@@ -90,11 +149,16 @@ def gen_spans_with_truth(
             base.update(extra)
             spans.append(base)
 
-        root_extra: dict[str, Any] = {"gen_ai.request.model": model}
+        root_extra: dict[str, Any] = {"gen_ai.request.model": model, "start_time": start_time}
         if include_outcomes:
             root_extra["harness.outcome"] = "success" if succeeded else "failure"
-        if signature is not None:
+        if signature is not None and include_signatures:
             root_extra["harness.task_signature"] = signature
+        template = DEMO_TASK_INPUTS.get(signature) if signature else None
+        if template:
+            root_extra["input.messages"] = template.format(
+                n=7000 + run_no, c=800 + run_no, d=(run_no % 28) + 1
+            )
         span("0001", None, "invoke_agent", root_extra)
 
         for turn in range(rng.randint(2, 4)):
@@ -121,7 +185,12 @@ def gen_spans_with_truth(
     for _ in range(unsigned_runs):
         add_run(None, 0.5)
 
-    return spans, truth
+    return spans, labels
+
+
+def _minute_to_iso(minute: int) -> str:
+    hour, minute_of_hour = 8 + minute // 60, minute % 60
+    return f"2026-07-01T{hour:02d}:{minute_of_hour:02d}:00+00:00"
 
 
 def write_spans_jsonl(path: str | Path, spans: list[dict[str, Any]]) -> Path:

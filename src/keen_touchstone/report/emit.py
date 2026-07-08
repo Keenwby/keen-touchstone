@@ -24,7 +24,8 @@ class RunMeta:
     scorer: str | None = None
 
 
-def emit(result: SuiteResult, out_dir: Path, meta: RunMeta, console: Console | None = None) -> Path:
+def emit(result: SuiteResult, out_dir: Path, meta: RunMeta, console: Console | None = None,
+         extra: dict | None = None) -> Path:
     """Write aggregate.json (+ report.html once M5 lands) and print a summary.
 
     Returns the path of aggregate.json.
@@ -44,6 +45,8 @@ def emit(result: SuiteResult, out_dir: Path, meta: RunMeta, console: Console | N
         "suite": result.suite.to_schema_dict(),
         "tasks": [t.to_schema_dict() for t in result.tasks],
     }
+    if extra:
+        payload.update(extra)
     json_path = out_dir / "aggregate.json"
     json_path.write_text(json.dumps(payload, indent=2) + "\n")
 

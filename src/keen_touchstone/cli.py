@@ -119,6 +119,9 @@ def run(task_file: str, model: str, epochs: int, out: Path, scorer: str | None, 
 @click.option("--demo", "use_demo", is_flag=True, help="Generate synthetic demo traces instead of reading a file.")
 @click.option("--outcome-regex", default=None, help="Fallback outcome rule: regex matched against the root span's output.messages.")
 @click.option("--threshold", type=float, default=1.0, show_default=True, help="Success threshold for gen_ai.evaluation.score.value.")
+@click.option("--signature-strategy", "sig_strategy", type=click.Choice(["declared", "template", "tool-sequence"]),
+              default="declared", show_default=True,
+              help="Task identity: declared harness.task_signature tags, or DERIVED grouping (template-masked input / tool sequence) — derived grouping is a hypothesis and ships with a quality readout.")
 @click.option("--outcomes-from", "verdicts_path", type=click.Path(exists=True), default=None,
               help="EvalVerdict JSONL as the authoritative outcome source (joined on trace_id).")
 @click.option("--license", "license_path", type=click.Path(exists=True), default=None,
@@ -126,7 +129,7 @@ def run(task_file: str, model: str, epochs: int, out: Path, scorer: str | None, 
 @click.option("--out", type=click.Path(path_type=Path), default=Path("out/ingest"), show_default=True)
 @shared_options
 def ingest(traces: Path | None, use_demo: bool, outcome_regex: str | None, threshold: float,
-           verdicts_path: str | None, license_path: str | None,
+           sig_strategy: str, verdicts_path: str | None, license_path: str | None,
            out: Path, k_max: int | None, headline_k: int | None, resamples: int, seed: int) -> None:
     """Ingest OTel gen_ai.* spans (JSONL) — production traces in, pass^k out.
 
@@ -165,11 +168,26 @@ def ingest(traces: Path | None, use_demo: bool, outcome_regex: str | None, thres
                 if license_ is not None
                 else "programmatic verdicts"
             )
+        spans = read_spans_jsonl(traces)
+        strategy = None
+        readout = None
+        if sig_strategy != "declared":
+            from keen_touchstone.adapters.signatures import STRATEGIES, grouping_readout
+
+            strategy = STRATEGIES[sig_strategy]()
+            readout = grouping_readout(spans, strategy)
+            strategy = STRATEGIES[sig_strategy]()  # fresh cursors for the ingest pass
         ingested = trials_from_traces(
-            read_spans_jsonl(traces), threshold=threshold, outcome_regex=outcome_regex,
+            spans, strategy=strategy, threshold=threshold, outcome_regex=outcome_regex,
             outcome_overrides=outcome_overrides,
         )
-        result = _build_ingest_result(ingested, k_max, headline_k, resamples, seed)
+        result = _build_ingest_result(
+            ingested, k_max, headline_k, resamples, seed,
+            task_key_source="declared_tag" if sig_strategy == "declared" else "task_signature",
+        )
+        if readout is not None:
+            result.warnings.append(readout.caveat)
+            _print_grouping_readout(readout)
     emit(
         result,
         out,
@@ -180,16 +198,41 @@ def ingest(traces: Path | None, use_demo: bool, outcome_regex: str | None, thres
             scorer=scorer_label,
         ),
         console=console,
+        extra={"grouping": readout.to_dict()} if readout is not None else None,
     )
 
 
-def _build_ingest_result(ingested, k_max, headline_k, resamples, seed):
+def _print_grouping_readout(readout) -> None:
+    from rich.table import Table
+
+    console.print(f"\n[bold]task-identity readout[/bold] [dim](strategy: {readout.strategy})[/dim]")
+    console.print(
+        f"  {readout.n_grouped}/{readout.n_runs} runs grouped into {readout.n_clusters} clusters · "
+        f"{readout.n_unsigned} unsigned · singleton rate {readout.singleton_rate:.0%} · "
+        f"largest cluster {readout.largest_cluster_share:.0%}"
+        + (f" · purity vs declared tags {readout.purity_vs_declared:.0%}" if readout.purity_vs_declared is not None else "")
+    )
+    table = Table(show_header=True)
+    table.add_column("cluster (why these grouped)")
+    table.add_column("size", justify="right")
+    table.add_column("exemplar")
+    for cluster in readout.clusters[:8]:
+        table.add_row(
+            (cluster.template or cluster.signature)[:70],
+            str(cluster.size),
+            (cluster.exemplars[0] if cluster.exemplars else "—")[:60],
+        )
+    console.print(table)
+    console.print(f"  [yellow]caveat:[/yellow] {readout.caveat}")
+
+
+def _build_ingest_result(ingested, k_max, headline_k, resamples, seed, task_key_source="declared_tag"):
     result = build_suite_result(
         ingested.tasks,
         context="online",
         model=ingested.model,
         agent_config_hash=ingested.agent_config_hash,
-        task_key_source="declared_tag",
+        task_key_source=task_key_source,
         k_max=k_max,
         headline_k=headline_k,
         n_resamples=resamples,
