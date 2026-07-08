@@ -335,6 +335,131 @@ def online_demo(out: Path, seed: int) -> None:
         run_online_demo(out, seed=seed, console=console)
 
 
+@main.command("attribute-demo")
+@click.option("--out", type=click.Path(path_type=Path), default=Path("out/attribute-demo"), show_default=True)
+@click.option("--seed", type=int, default=2026, show_default=True)
+def attribute_demo(out: Path, seed: int) -> None:
+    """Keyless: one agent, two switchable fault sources, four experiment cells
+    → measured model-vs-harness shares that recover the designed truth."""
+    from keen_touchstone.demo.attribution_demo import run_attribution_demo
+
+    with _CleanErrors():
+        run_attribution_demo(out, seed=seed, console=console)
+
+
+@main.command("attribute")
+@click.option("--baseline", required=True, type=click.Path(exists=True), help="aggregate.json of (model1, harness1) — the failing config.")
+@click.option("--model-swap", "model_swap", required=True, type=click.Path(exists=True), help="aggregate.json of (model2, harness1).")
+@click.option("--harness-swap", "harness_swap", required=True, type=click.Path(exists=True), help="aggregate.json of (model1, harness2).")
+@click.option("--both-swap", "both_swap", default=None, type=click.Path(exists=True), help="Optional fourth cell (model2, harness2) — unlocks the interaction term.")
+@click.option("--alpha", type=float, default=0.05, show_default=True)
+@click.option("--seed", type=int, default=2026, show_default=True)
+@click.option("--out", type=click.Path(path_type=Path), default=Path("out/attribution"), show_default=True)
+def attribute(baseline: str, model_swap: str, harness_swap: str, both_swap: str | None,
+              alpha: float, seed: int, out: Path) -> None:
+    """Model vs harness: MEASURED failure attribution from counterfactual cells.
+
+    Run the same task suite under baseline / model-swap / harness-swap (and
+    optionally both-swap), then feed the aggregates here. This is analysis,
+    not a gate — exit 0 regardless of what it finds.
+    """
+    import json as json_mod
+
+    from keen_touchstone.artifacts import Attribution, load_schema
+    from keen_touchstone.attribution import decompose
+    from keen_touchstone.online import load_aggregate_tasks
+
+    with _CleanErrors():
+        cells = {"baseline": load_aggregate_tasks(baseline)[0],
+                 "model_swap": load_aggregate_tasks(model_swap)[0],
+                 "harness_swap": load_aggregate_tasks(harness_swap)[0]}
+        if both_swap is not None:
+            cells["both_swap"] = load_aggregate_tasks(both_swap)[0]
+        result = decompose(**cells, alpha=alpha, seed=seed)
+
+    console.print()
+    console.rule("[bold]attribute — model vs harness, measured[/bold]")
+    console.print(f"  {result.sentence()}")
+    console.print(
+        f"  [dim]{result.n_shared_tasks} shared tasks · paired sign-flip significance at "
+        f"α={alpha} · CIs bootstrap over tasks[/dim]"
+    )
+    if result.underpowered:
+        console.print("  [yellow]UNDERPOWERED_NEED_MORE_N[/yellow]")
+    for note in result.notes:
+        console.print(f"  [dim]note: {note}[/dim]")
+
+    # the Phase 0 attribution block, filled for the first time
+    import jsonschema as jsonschema_mod
+
+    attribution_block = Attribution(
+        model_share=max(0.0, min(1.0, result.model_share.delta)),
+        harness_share=max(0.0, min(1.0, result.harness_share.delta)),
+        method="measured_ab",
+        confidence_band=(
+            f"model {result.model_share.ci_low * 100:+.1f}..{result.model_share.ci_high * 100:+.1f}pp, "
+            f"harness {result.harness_share.ci_low * 100:+.1f}..{result.harness_share.ci_high * 100:+.1f}pp (95%)"
+        ),
+        etclovg_layer=None,
+    )
+    from dataclasses import asdict
+
+    out.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "sentence": result.sentence(),
+        "attribution": attribution_block.model_dump(mode="json"),
+        "detail": {
+            "n_shared_tasks": result.n_shared_tasks,
+            "dropped_per_cell": result.dropped_per_cell,
+            "baseline_failure": result.baseline_failure,
+            "baseline_failure_ci": list(result.baseline_failure_ci),
+            "model_share": asdict(result.model_share),
+            "harness_share": asdict(result.harness_share),
+            "interaction": asdict(result.interaction) if result.interaction else None,
+            "irreducible_failure": result.irreducible_failure,
+            "has_both_cell": result.has_both_cell,
+            "underpowered": result.underpowered,
+            "notes": result.notes,
+        },
+        "cells": {"baseline": str(baseline), "model_swap": str(model_swap),
+                  "harness_swap": str(harness_swap), "both_swap": str(both_swap) if both_swap else None},
+    }
+    # validate the attribution block against the canonical schema's sub-shape
+    schema = load_schema("reliability-aggregate")["properties"]["attribution"]
+    jsonschema_mod.validate(payload["attribution"], schema)
+    path = out / "attribution.json"
+    path.write_text(json_mod.dumps(payload, indent=2) + "\n")
+    console.print(f"\n[dim]wrote[/dim] {path}")
+
+
+@main.command("diagnose")
+@click.argument("cassette", type=click.Path(exists=True))
+def diagnose_cmd(cassette: str) -> None:
+    """ETCLOVG layer hypotheses from a FAILED cassette — a ranked hint, never
+    a verdict (the disclaimer is part of the output, not a footnote)."""
+    from keen_touchstone.attribution import diagnose_cassette
+
+    with _CleanErrors():
+        report = diagnose_cassette(cassette)
+    console.print()
+    if not report.failed:
+        console.print("[green]this run succeeded — nothing to diagnose[/green]")
+        return
+    console.rule("[bold]diagnose — harness-layer hypotheses[/bold]")
+    console.print(f"  [yellow]{report.disclaimer}[/yellow]\n")
+    console.print(
+        f"  run [dim]{report.run_id[:12]}…[/dim] failed with "
+        f"[red]{report.error_type}[/red]: {report.error_message}"
+        + (f" [dim](died after a {report.died_after})[/dim]" if report.died_after else "")
+    )
+    for rank, hyp in enumerate(report.hypotheses, 1):
+        console.print(f"  {rank}. [bold]{hyp.layer}[/bold] — {hyp.reason}")
+    console.print(
+        "\n  [dim]to MEASURE instead of guess: run the suite with a swapped model and a fixed "
+        "harness, then `touchstone attribute`[/dim]"
+    )
+
+
 @main.command("compare")
 @click.argument("baseline", type=click.Path(exists=True))
 @click.argument("candidate", type=click.Path(exists=True))
