@@ -68,8 +68,8 @@ The output is a `ReliabilityAggregate` (see [`SPEC.md`](./docs/spec/SPEC.md) §4
 | 0 | 4-artifact open spec (`Span`/`Cassette`/`EvalVerdict`/`ReliabilityAggregate` on one `trace_id`) | ✅ `docs/spec/` |
 | 1 | trace-bootstrap → `pass^k` ± CI + decay curve | ✅ |
 | 2 | judge calibration as a CI-blocking gate (κ + alt-test → `JUDGE_LICENSED`/`NEEDS_HUMAN`) | ✅ |
-| **3** | **cassette + deterministic replay (harness-logic re-execution)** | ✅ |
-| 4 | online layer + the unified offline↔online loop | — |
+| 3 | cassette + deterministic replay (harness-logic re-execution) | ✅ |
+| **4** | **online layer + the unified offline↔online loop** | ✅ |
 | 5 | model-vs-harness attribution (counterfactual adjudication) | — |
 
 ## The judge gate (Phase 2)
@@ -105,6 +105,26 @@ uv run touchstone replay out/replay-demo/cassettes/<run>.cassette.jsonl \
 Your agent routes its nondeterminism through an explicit seam — `io.llm_call(...)`, `io.tool_call(...)`, `io.now()`, `io.decision(...)`. Recording runs it for real and tapes everything (including the crash) to an append-only, schema-validated cassette, co-emitting Spans on the same `trace_id` — so recorded runs feed straight into `touchstone ingest` and the reliability stats. Replay re-executes **your orchestration code** against the frozen outputs: per-kind cursors, input matching (a changed harness diverges loudly at the exact step, with a diff), model/tool identity checks, exhaustion that **never** silently falls back to live systems, the clock served from tape, and leftover-events reporting.
 
 **Honest limits, verbatim from the design thesis:** replay reproduces the harness orchestration logic given frozen model/tool outputs — **not model reproducibility** (hosted-API nondeterminism is unfixable from outside). Only calls routed through the seam are taped; SDK-level zero-code-change interception is future work.
+
+## The online loop (Phase 4)
+
+The thesis sentence, executable: *the same `pass^k` definition runs over an offline benchmark AND continuously over live traffic.*
+
+```bash
+uv run touchstone online-demo                    # keyless: the whole loop in one command
+uv run touchstone ingest traffic.jsonl --signature-strategy template
+                                                 # unlabeled traffic → DERIVED task identity
+uv run touchstone watch traffic.jsonl --window 30 --slo 0.6@4 [--follow]
+                                                 # tumbling windows; confident breach = exit 1
+uv run touchstone compare baseline/aggregate.json candidate/aggregate.json --at-k 4
+                                                 # paired sign-flip test on shared tasks
+uv run touchstone slo-gate out/aggregate.json --slo 0.6@4     # release gate for CI
+```
+
+- **Task identity for organic traffic** — the keystone problem no shipping tool has cracked. v0.4 ships two deterministic, *inspectable* strategies: masked-input **templates** (a human reads exactly why two runs grouped) and **tool sequences**. Every derived grouping carries a quality readout (exemplars, singleton rate, purity vs declared tags when present) and a non-optional caveat: **derived grouping is a hypothesis, not ground truth.** Embedding clustering is deliberately deferred — it fails the spec's "stable" and "inspectable" requirements today.
+- **watch** uses tumbling (never sliding) windows and two alert levels: BREACH only when the whole CI sits below the SLO; a straddling CI is a warning. The repeated-look inflation is noted in the output, not hidden.
+- **compare** is a paired sign-flip permutation test on shared tasks (exact to 2^12, scipy-cross-checked) with a bootstrap CI on the mean delta — and an UNDERPOWERED flag that says "absence of evidence" out loud when the shared-task count is small.
+- Still **ingest-don't-collect**: no daemon, no collector, no dashboards — read the files you already have.
 
 ## Development
 

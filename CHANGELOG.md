@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased] — 0.4.0 (Phase 4: the online loop, built 2026-07-08)
+
+**The unified loop, delivered:** one `pass^k` definition, offline and online. And a first honest cut at the keystone open problem — task identity for organic traffic.
+
+- **Derived task identity** (`adapters/signatures.py`): template strategy (masked-input normalization — numbers/ids/emails/urls/dates → placeholders; the readable template IS the signature) and tool-sequence strategy; both deterministic and inspectable. `GroupingReadout` mandates exemplars, singleton rate, largest-cluster share, weighted purity vs declared tags, and a non-optional hypothesis caveat shipped in warnings and aggregate.json. Embedding clustering deferred (fails SPEC §5 "stable"+"inspectable" today). Truth recovery on synthetic unlabeled traffic: 8/8 clusters, 100% purity.
+- **watch** (`online/watch.py`): time-ordered tumbling windows (never sliding — overlapping looks flap and silently multiply SLO tests; residual repeated-look inflation is printed, not hidden); per-window pass^k via the same suite builder; alert levels BREACH (whole CI below SLO) / warning (point below, CI straddles) / insufficient_n (SLO deeper than the window supports — no claim) / pending (trailing partial). `--follow` re-scans; confident breach = exit 1.
+- **compare** (`online/compare.py`): the last unshipped thesis §6.4 statistic — paired difference testing. Sign-flip permutation on shared-task pass^k deltas (exact ≤ 2^12, scipy.stats.permutation_test parity to 1e-12; seeded + add-one smoothing beyond), bootstrap CI on the mean delta, verdicts SIGNIFICANT_REGRESSION/IMPROVEMENT/NOISE + UNDERPOWERED honesty flag. Per-task (n, c) reconstructed exactly from aggregate.json (verified, not assumed). Exit 1 on significant regression.
+- **slo-gate**: reads the decay curve at the SLO's k; fails only on a confident breach by default (`--strict` gates on the point) — a release gate should be conservative about blocking on noise.
+- **online-demo** (keyless): unlabeled 8-task drifting stream → 100% identity recovery → ok/ok/BREACH/BREACH windows → paired SIGNIFICANT_REGRESSION (Δ −0.82 [−0.92, −0.70], exact p = 0.0078). Demo statistics honest by construction: 5 tasks can never reach α = 0.05 under a sign-flip test, so the demo carries 8.
+- Candidate spec additions for v0.3 of the data model (recorded per the headline_k precedent): a ComparisonResult shape and a WindowSeries shape.
+- **Review round 4: submitted through the user's own `/adversarial-review` pipeline** (request in `requests/inbox/`) instead of session-spawned skeptics — findings to be fixed in a follow-up round (asynchronous).
+
 ## [Unreleased] — 0.3.0 (Phase 3: cassette + deterministic replay, built 2026-07-03)
 
 **The third moat, delivered:** no shipping tool can deterministically replay an agent run. `touchstone replay` re-executes your orchestration logic against the taped model/tool outputs — same result or same crash, zero network — or names the exact step where the harness diverged.
