@@ -100,7 +100,8 @@ def test_cli_diagnose(demo) -> None:
     assert ok_tape is not None
     result = CliRunner().invoke(main, ["diagnose", str(ok_tape)])
     assert result.exit_code == 0
-    assert "nothing to diagnose" in result.output
+    # r5-F4 wording: ok = no crash, not "run verified" (join lines: rich wraps)
+    assert "nothing to say" in " ".join(result.output.split())
 
 
 def test_cli_attribute_demo_e2e(tmp_path) -> None:

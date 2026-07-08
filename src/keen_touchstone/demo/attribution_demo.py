@@ -134,7 +134,10 @@ def run_attribution_demo(out: Path, seed: int = 2026, console: Console | None = 
     console.print(f"  {attribution.sentence()}")
 
     console.print("\n[bold]and the low-trust hint, properly caged[/bold] — diagnosing a failed tape:")
-    crashed = next((out / "baseline" / "cassettes").glob("*.cassette.jsonl"))
+    tapes = list((out / "baseline" / "cassettes").glob("*.cassette.jsonl"))
+    if not tapes:
+        raise ValueError("demo produced no cassettes — cannot run the diagnose leg")
+    crashed = tapes[0]
     for cassette in (out / "baseline" / "cassettes").glob("*.cassette.jsonl"):
         report = diagnose_cassette(cassette)
         if report.failed and report.error_type == "ValueError":

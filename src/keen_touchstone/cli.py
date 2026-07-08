@@ -39,14 +39,25 @@ def shared_options(fn):
 
 
 class _CleanErrors:
-    """Domain errors (bad inputs, mixed configs) become clean CLI messages."""
+    """Domain errors (bad inputs, mixed configs) become clean CLI messages.
+
+    Exit-code contract (r4-F3 — stated once, honored everywhere):
+      0 = pass / analysis completed
+      1 = a GATE fired (confident breach, significant regression, diverged
+          replay, unlicensed judge)
+      2 = usage error (click: bad flags/paths)
+      3 = domain/data error (malformed traces, foreign aggregates, mixed
+          configs) — distinct from 1 so CI never mistakes a broken pipeline
+          for a fired gate."""
 
     def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc, tb):
         if exc_type in (ValueError, FileNotFoundError):
-            raise click.ClickException(str(exc))
+            error = click.ClickException(str(exc))
+            error.exit_code = 3
+            raise error
         return False
 
 
@@ -250,7 +261,7 @@ def _build_ingest_result(ingested, k_max, headline_k, resamples, seed, task_key_
 @click.option("--threshold", type=float, default=1.0, show_default=True)
 @click.option("--outcome-regex", default=None)
 @click.option("--out", "out_json", type=click.Path(path_type=Path), default=None, help="Also write the window series as JSON.")
-@click.option("--follow", is_flag=True, help="Keep re-scanning the file (Ctrl-C to stop).")
+@click.option("--follow", is_flag=True, help="Keep re-scanning the file (Ctrl-C to stop). NOTE: in follow mode the process never exits on breach — exit-code gating applies to single-pass mode only.")
 @click.option("--every", type=float, default=30.0, show_default=True, help="Re-scan interval for --follow, seconds.")
 @click.option("--seed", type=int, default=2026, show_default=True)
 def watch(traces: str, window: int, slo: str, sig_strategy: str, threshold: float,
@@ -364,18 +375,57 @@ def attribute(baseline: str, model_swap: str, harness_swap: str, both_swap: str 
     not a gate — exit 0 regardless of what it finds.
     """
     import json as json_mod
+    import os as os_mod
 
     from keen_touchstone.artifacts import Attribution, load_schema
     from keen_touchstone.attribution import decompose
     from keen_touchstone.online import load_aggregate_tasks
 
     with _CleanErrors():
-        cells = {"baseline": load_aggregate_tasks(baseline)[0],
-                 "model_swap": load_aggregate_tasks(model_swap)[0],
-                 "harness_swap": load_aggregate_tasks(harness_swap)[0]}
+        paths = {"baseline": baseline, "model_swap": model_swap, "harness_swap": harness_swap}
         if both_swap is not None:
-            cells["both_swap"] = load_aggregate_tasks(both_swap)[0]
+            paths["both_swap"] = both_swap
+        # r5-F1a: the same file passed for two cells is never a valid experiment
+        real = {name: os_mod.path.realpath(p) for name, p in paths.items()}
+        for a in real:
+            for b in real:
+                if a < b and real[a] == real[b]:
+                    raise ValueError(
+                        f"--{a.replace('_', '-')} and --{b.replace('_', '-')} point at the SAME "
+                        "file — every cell must come from its own experiment run"
+                    )
+        cells: dict = {}
+        identity: dict = {}
+        for name, p in paths.items():
+            tasks, payload = load_aggregate_tasks(p)
+            cells[name] = tasks
+            suite = payload.get("suite", {})
+            identity[name] = (suite.get("model"), suite.get("agent_config_hash"))
+        # r5-F1b: the experiment's premise is checkable from metadata the files
+        # already carry — check it instead of discarding it
+        identity_warnings: list[str] = []
+        if identity["baseline"] == identity["model_swap"]:
+            raise ValueError(
+                f"the model_swap cell has the SAME model+config identity as baseline "
+                f"{identity['baseline']} — it cannot be a model swap"
+            )
+        if identity["baseline"][0] != identity["harness_swap"][0]:
+            identity_warnings.append(
+                f"harness_swap should keep the baseline MODEL, but models differ: "
+                f"{identity['baseline'][0]!r} vs {identity['harness_swap'][0]!r} — check your cells"
+            )
+        if identity["baseline"][0] == identity["model_swap"][0]:
+            identity_warnings.append(
+                f"model_swap carries the same model tag as baseline ({identity['baseline'][0]!r}) "
+                "— if this is a different endpoint/version under one name, fine; otherwise check"
+            )
+        if both_swap is not None and identity["model_swap"][0] != identity["both_swap"][0]:
+            identity_warnings.append(
+                f"both_swap should carry the model_swap MODEL, but models differ: "
+                f"{identity['model_swap'][0]!r} vs {identity['both_swap'][0]!r} — check your cells"
+            )
         result = decompose(**cells, alpha=alpha, seed=seed)
+        result.notes.extend(identity_warnings)
 
     console.print()
     console.rule("[bold]attribute — model vs harness, measured[/bold]")
@@ -392,9 +442,15 @@ def attribute(baseline: str, model_swap: str, harness_swap: str, both_swap: str 
     # the Phase 0 attribution block, filled for the first time
     import jsonschema as jsonschema_mod
 
+    # r5-F2: a share outside [0,1] emits NULL (schema-legal), never a
+    # fabricated in-range number — a clamped 0.0 read as "measured: no effect"
+    # while the sentence said "made it worse". Policy documented in README.
+    def share_or_null(delta: float) -> float | None:
+        return delta if 0.0 <= delta <= 1.0 else None
+
     attribution_block = Attribution(
-        model_share=max(0.0, min(1.0, result.model_share.delta)),
-        harness_share=max(0.0, min(1.0, result.harness_share.delta)),
+        model_share=share_or_null(result.model_share.delta),
+        harness_share=share_or_null(result.harness_share.delta),
         method="measured_ab",
         confidence_band=(
             f"model {result.model_share.ci_low * 100:+.1f}..{result.model_share.ci_high * 100:+.1f}pp, "
@@ -421,8 +477,8 @@ def attribute(baseline: str, model_swap: str, harness_swap: str, both_swap: str 
             "underpowered": result.underpowered,
             "notes": result.notes,
         },
-        "cells": {"baseline": str(baseline), "model_swap": str(model_swap),
-                  "harness_swap": str(harness_swap), "both_swap": str(both_swap) if both_swap else None},
+        "cells": {name: {"path": real[name], "model": identity[name][0],
+                         "agent_config_hash": identity[name][1]} for name in paths},
     }
     # validate the attribution block against the canonical schema's sub-shape
     schema = load_schema("reliability-aggregate")["properties"]["attribution"]
@@ -443,7 +499,11 @@ def diagnose_cmd(cassette: str) -> None:
         report = diagnose_cassette(cassette)
     console.print()
     if not report.failed:
-        console.print("[green]this run succeeded — nothing to diagnose[/green]")
+        console.print(
+            "[green]this run completed without a harness crash[/green] — the crash-rule table "
+            "has nothing to say. [dim]A graded/task-level failure is invisible on the tape: "
+            "check the score, or measure with `touchstone attribute`.[/dim]"
+        )
         return
     console.rule("[bold]diagnose — harness-layer hypotheses[/bold]")
     console.print(f"  [yellow]{report.disclaimer}[/yellow]\n")

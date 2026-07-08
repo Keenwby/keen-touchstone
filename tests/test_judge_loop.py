@@ -216,7 +216,7 @@ def test_cli_ingest_with_license_end_to_end(demo_out) -> None:
         "--license", str(out / "sloppy-judge" / "license.json"),
         "--out", str(out / "cli-blocked"),
     ])
-    assert blocked.exit_code == 1
+    assert blocked.exit_code == 3  # r4-F3: refused input = domain error, not a fired gate
     assert "NEEDS_HUMAN" in blocked.output
     assert not (out / "cli-blocked" / "aggregate.json").exists()  # nothing emitted
 
@@ -225,5 +225,5 @@ def test_cli_ingest_with_license_end_to_end(demo_out) -> None:
         "--outcomes-from", str(out / "verdicts.good-judge.jsonl"),
         "--out", str(out / "cli-nolicense"),
     ])
-    assert no_license.exit_code == 1
+    assert no_license.exit_code == 3  # r4-F3
     assert "not evidence" in no_license.output

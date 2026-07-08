@@ -59,6 +59,9 @@ def diagnose_cassette(cassette_path: str | Path) -> DiagnosisReport:
         raise ValueError(f"{cassette_path}: no __final__ event — incomplete tape")
     outcome = final.output or {}
     if outcome.get("ok"):
+        # r5-F4: "ok" on the tape means NO HARNESS CRASH — the task itself may
+        # still have failed its grading (invisible from the tape). Never claim
+        # the run "succeeded"; the CLI phrasing follows this distinction.
         return DiagnosisReport(
             run_id=run_id, failed=False, error_type=None, error_message=None,
             died_after=None,
@@ -90,6 +93,14 @@ def _rules(err_type: str, message: str, last: TraceEvent | None) -> list[Hypothe
         if all(h.layer != layer for h in ranked):
             ranked.append(Hypothesis(layer, reason))
 
+    # r5-F5: the tool-output error-marker check must run BEFORE the generic
+    # tool_call arms — both arms add Tooling, and add() dedupes by layer, so
+    # this rule was dead code (its most useful signal could never surface)
+    if last is not None and last.kind == "tool_call":
+        tool_output = json.dumps(last.output, default=str).lower()
+        if '"error"' in tool_output or "failed" in tool_output:
+            add("Tooling", "the last tool output itself carries error markers")
+
     if any(marker in message for marker in _TIMEOUT_MARKERS) or "Timeout" in err_type:
         add("Lifecycle", "the failure mentions a timeout/deadline — run lifecycle management")
     if any(marker in message for marker in _CONTEXT_MARKERS):
@@ -105,9 +116,6 @@ def _rules(err_type: str, message: str, last: TraceEvent | None) -> list[Hypothe
         else:
             add("Tooling", "the run died right after a tool call")
             add("Execution", "harness-side handling of that tool result is the other suspect")
-        tool_output = json.dumps(last.output, default=str).lower()
-        if '"error"' in tool_output or "failed" in tool_output:
-            add("Tooling", "the last tool output itself carries error markers")
     elif last is not None and last.kind == "llm_call":
         if err_type in _PARSE_ERRORS:
             add("Execution",

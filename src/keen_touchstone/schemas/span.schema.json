@@ -29,6 +29,22 @@
     },
     "output.messages": { "type": ["array", "string", "null"] },
 
+    "start_time": {
+      "type": ["string", "number", "null"],
+      "description": "Run/span start instant: ISO-8601 string (Z or offset) or numeric epoch (s/ms/ns auto-detected). Defined in v0.4 (review r4-F1/F4): watch orders runs by it; unparseable values are treated as untimestamped and counted."
+    },
+    "harness.outcome": {
+      "type": ["string", "boolean", "null"],
+      "description": "Declared run outcome: success/failure (or boolean). Read by the trace adapter since v0.1; formally defined in v0.4 (review r4-Q2)."
+    },
+    "gen_ai.evaluation.score.value": {
+      "type": ["number", "null"],
+      "description": "Flattened OTel evaluation-event score; success when >= threshold. Defined in v0.4 (review r4-Q2)."
+    },
+    "gen_ai.evaluation.score.label": {
+      "type": ["string", "null"],
+      "description": "Flattened OTel evaluation-event label (pass/fail vocabulary). Defined in v0.4 (review r4-Q2)."
+    },
     "harness.step_id": {
       "type": "integer",
       "minimum": 0,

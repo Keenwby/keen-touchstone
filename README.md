@@ -142,6 +142,19 @@ uv run touchstone diagnose out/replay-demo/cassettes/<failed>.cassette.jsonl
 
 - **The trustworthy instrument is a measured A/B**: run the same task suite under baseline / model-swap / harness-swap (optionally both-swap); shares are paired per-task failure deltas with bootstrap CIs and sign-flip significance. With the fourth cell the 2×2 identity holds exactly (asserted at runtime) and the **interaction term** is estimated: positive = some failures need both fixes; negative = the shares double-count. Negative shares ("the better model made it worse") are findings, reported as such. The literature's "harness fixes buy 15–50%" number is single-team and unreplicated — this tool never cites it; it measures *your* data.
 - **The low-trust hint is caged**: `diagnose` ranks ETCLOVG harness-layer hypotheses from a failed cassette with the academic ceiling (**step-level attribution SOTA ≈ 14%**, agent-level ≈ 53%) printed as the output header — a reading list for a human, never a verdict.
+- **Out-of-range shares are `null`, never clamped**: when a delta falls outside [0, 1] as a share of baseline failure (e.g. the swap made things worse), `attribution.json` records `null` for that share — `0.0` would read as "measured: no effect", which is a different claim. The raw delta and its CI stay in the `detail` block; the terminal output names the finding (e.g. "the model swap made it WORSE").
+- **Cell identity is checked before any math**: passing the same file (or byte-identical cells) for two arms is a hard error; model tags that contradict the 2×2 design (e.g. swap files accidentally transposed) are warned in the output and in `attribution.json`.
+
+## Exit codes (one contract, every command)
+
+| code | meaning |
+|------|---------|
+| 0 | ran fine; any gate present did not fire |
+| 1 | a gate fired on valid input (SLO breach, significant regression, judge NEEDS_HUMAN, replay divergence) |
+| 2 | usage error (bad flags/arguments — click's convention) |
+| 3 | domain/data error (unreadable or invalid input, refused license, contaminated cells) |
+
+CI can therefore distinguish "the agent regressed" (1) from "the pipeline is broken" (3) — conflating them was review finding r4-F3.
 
 ## Development
 

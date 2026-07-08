@@ -87,7 +87,10 @@ def run_online_demo(out: Path, seed: int = 2026, console: Console | None = None)
 
     # ---- 3. compare: pre vs post incident, paired --------------------------
     console.print("\n[bold]③ compare:[/bold] pre-incident vs post-incident, paired on derived tasks")
-    runs = sorted(runs_from_spans(spans), key=lambda r: str(r.attr("start_time")))
+    from keen_touchstone.online.watch import parse_stamp
+
+    runs = sorted(runs_from_spans(spans),
+                  key=lambda r: parse_stamp(r.attr("start_time")) or __import__("datetime").datetime.min.replace(tzinfo=__import__("datetime").timezone.utc))
     half = len(runs) // 2
     halves = {}
     for name, chunk in (("baseline", runs[:half]), ("candidate", runs[half:])):

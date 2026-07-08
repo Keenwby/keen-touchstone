@@ -82,6 +82,10 @@ class AttributionResult:
         """The sentence no other tool can produce."""
         def pp(share: Share) -> str:
             sig = "significant" if share.significant else "not significant — could be noise"
+            if self.underpowered:
+                # r5-F6: a bootstrap over ≤4 points prints false precision
+                # (a width-zero bracket beside p=1.0) — annotate, don't fake
+                return f"{share.delta * 100:+.1f}pp [too few tasks for a CI] ({sig})"
             return (
                 f"{share.delta * 100:+.1f}pp [{share.ci_low * 100:+.1f}, "
                 f"{share.ci_high * 100:+.1f}] ({sig})"
@@ -157,6 +161,22 @@ def decompose(
         )
 
     f = {name: _failure_vector(Cell(name, tasks), shared) for name, tasks in cells.items()}
+
+    # r5-F7: unequal trial counts across cells keep the paired math unbiased
+    # but make per-pair precision heterogeneous — say so instead of implying
+    # equal-precision shares
+    unequal = [
+        key for key in shared
+        if len({cells[name][key][0] for name in cells}) > 1
+    ]
+    if unequal:
+        example = unequal[0]
+        counts = {name: cells[name][example][0] for name in cells}
+        notes.append(
+            f"{len(unequal)} task(s) have UNEQUAL trial counts across cells (e.g. "
+            f"{example}: {counts}) — shares remain unbiased but their precision differs "
+            "per cell; the CIs reflect the realized variance"
+        )
 
     model_deltas = f["baseline"] - f["model_swap"]
     harness_deltas = f["baseline"] - f["harness_swap"]

@@ -156,7 +156,7 @@ def test_cli_clean_error_on_bad_ingest(tmp_path) -> None:
     bad = tmp_path / "bad.jsonl"
     bad.write_text('{"trace_id": "t", "span_id": "s"}\n')  # no signature/outcome
     result = CliRunner().invoke(main, ["ingest", str(bad)])
-    assert result.exit_code == 1
+    assert result.exit_code == 3  # r4-F3: domain error, distinct from a fired gate (1)
     assert "Error:" in result.output
     assert "Traceback" not in result.output
 

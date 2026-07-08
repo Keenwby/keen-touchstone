@@ -146,7 +146,7 @@ def test_cli_calibrate_and_gate_end_to_end(tmp_path) -> None:
     data["status"] = "SUPER_LICENSED"
     license_path.write_text(json.dumps(data))
     gate_bad = runner.invoke(main, ["judge", "gate", str(license_path)])
-    assert gate_bad.exit_code == 1
+    assert gate_bad.exit_code == 3  # r4-F3: invalid file = domain error, not a gate verdict
     assert "not a valid license" in gate_bad.output
 
 

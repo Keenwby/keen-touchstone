@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from keen_touchstone.adapters.otel_traces import Span, TraceRun, trials_from_traces
@@ -65,18 +66,61 @@ class WatchReport:
     windows: list[WindowResult]
     slo_value: float
     slo_k: int
-    latest_full_status: str  # status of the last non-pending window
+    latest_full_status: str  # status of the last non-pending window (display)
+    standing_breach: bool
+    """r4-F2: only an `ok` window may CLEAR a confident breach. `warning`,
+    `insufficient_n` and `no_data` are abstentions/ambiguity, not evidence of
+    recovery — an abstention must never retract a standing alert."""
     warnings: list[str] = field(default_factory=list)
 
     @property
     def breached(self) -> bool:
-        return self.latest_full_status == "breach"
+        return self.standing_breach
 
 
-def _run_sort_key(run: TraceRun) -> tuple[int, str]:
-    stamp = run.attr("start_time")
-    # timestamped runs sort by time; untimestamped keep file order after them
-    return (0, str(stamp)) if stamp else (1, "")
+def parse_stamp(value: Any) -> datetime | None:
+    """Parse start_time into a real timeline (review r4-F4: string comparison
+    misordered mixed UTC offsets and sorted numeric epochs by digit count).
+    Accepts ISO-8601 (Z normalized) and numeric epochs (s/ms/ns heuristic)."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        v = float(value)
+        if v > 1e14:  # nanoseconds (OTLP startTimeUnixNano)
+            v /= 1e9
+        elif v > 1e11:  # milliseconds
+            v /= 1e3
+        try:
+            return datetime.fromtimestamp(v, tz=timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def _order_runs(runs: list[TraceRun]) -> tuple[list[TraceRun], int, int]:
+    """Timestamped runs in true chronological order first; runs without a
+    parseable stamp keep FILE order after them (r4-F1: file order is now real
+    — runs_from_spans preserves insertion order). Returns (ordered,
+    n_untimestamped, n_unparseable)."""
+    keyed: list[tuple[int, datetime | None, int, TraceRun]] = []
+    n_missing = n_unparseable = 0
+    for position, run in enumerate(runs):
+        raw = run.attr("start_time")
+        stamp = parse_stamp(raw)
+        if stamp is None:
+            if raw is None:
+                n_missing += 1
+            else:
+                n_unparseable += 1
+            keyed.append((1, None, position, run))
+        else:
+            keyed.append((0, stamp, position, run))
+    keyed.sort(key=lambda item: (item[0], item[1] or datetime.min.replace(tzinfo=timezone.utc), item[2]))
+    return [item[3] for item in keyed], n_missing, n_unparseable
 
 
 def _evaluate_window(
@@ -152,7 +196,7 @@ def watch_stream(
     slo_value, slo_k = parse_slo(slo)
     if window_size < 2:
         raise ValueError("window must hold at least 2 runs")
-    runs = sorted(runs_from_spans(spans), key=_run_sort_key)
+    runs, n_missing, n_unparseable = _order_runs(runs_from_spans(spans))
     if not runs:
         raise ValueError("no runs in the stream")
 
@@ -169,6 +213,31 @@ def watch_stream(
         )
     full = [w for w in windows if w.status != "pending"]
     latest = full[-1].status if full else "pending"
+
+    standing = False
+    breach_window: int | None = None
+    for w in full:
+        if w.status == "breach":
+            standing = True
+            breach_window = w.index
+        elif w.status == "ok":
+            standing = False
+    if standing and latest != "breach":
+        warnings.append(
+            f"a confident breach at window {breach_window} is STILL STANDING — later windows "
+            f"read {latest!r}, which is not evidence of recovery (only an ok window clears)"
+        )
+
+    if n_missing:
+        warnings.append(
+            f"{n_missing} run(s) carry no start_time — kept in file order after timestamped "
+            "runs; a mixed stream may window imprecisely"
+        )
+    if n_unparseable:
+        warnings.append(
+            f"{n_unparseable} run(s) carry an UNPARSEABLE start_time — treated as "
+            "untimestamped (expected ISO-8601 or epoch seconds/ms/ns)"
+        )
     n_evaluated = sum(1 for w in full if w.status in ("ok", "warning", "breach"))
     if n_evaluated > 1:
         warnings.append(
@@ -177,5 +246,5 @@ def watch_stream(
         )
     return WatchReport(
         windows=windows, slo_value=slo_value, slo_k=slo_k,
-        latest_full_status=latest, warnings=warnings,
+        latest_full_status=latest, standing_breach=standing, warnings=warnings,
     )

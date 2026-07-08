@@ -305,9 +305,15 @@ def test_object_reprs_in_result_compare_modulo_addresses(tmp_path) -> None:
     class Opaque:
         pass
 
+    keepalive: list[Opaque] = []  # r4-F7: pin record-time objects so CPython
+    # cannot re-allocate the replay-time Opaque at the SAME address (an exact
+    # collision made raw reprs match, skipped the masked path, and flaked)
+
     def agent(io, task_input):
         io.tool_call("t", {"k": 1}, lambda x: "v")
-        return {"handle": Opaque()}
+        handle = Opaque()
+        keepalive.append(handle)
+        return {"handle": handle}
 
     with RecordingIO(tmp_path, task_input={}) as io:
         io.finish(agent(io, {}))

@@ -40,8 +40,13 @@ _MASKS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I), "<id>"),
     (re.compile(r"\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}/\d{1,2}/\d{2,4}\b"), "<date>"),
     (re.compile(r"\b[A-Za-z]{1,6}-?\d[\w-]*\b"), "<id>"),  # INV-007, svc-42, C812, P99
+    (re.compile(r"\b[0-9a-f]{7,}\b", re.I), "<id>"),  # bare hex runs: git SHAs etc. (r4-F5)
     (re.compile(r"#?\d[\d,.]*"), "<num>"),
 ]
+# Known mask limits (r4-F5, documented not hidden): plural/singular variants
+# ("1 subscription" vs "3 subscriptions") and CJK-adjacent Latin ids (no \b
+# boundary between CJK and \w) still split clusters. The shred-guard note in
+# the readout is the runtime safety net for such gaps.
 _WS = re.compile(r"\s+")
 
 
@@ -155,6 +160,10 @@ class GroupingReadout:
     declared_coverage: float | None  # share of grouped runs that carried a tag
     clusters: list[ClusterInfo] = field(default_factory=list)
     caveat: str = HYPOTHESIS_CAVEAT
+    shred_warning: str | None = None
+    """r4-F5: purity is trivially perfect under total under-merge (every run
+    its own cluster). When the singleton share is high, purity carries no
+    information and this says so."""
 
     def to_dict(self) -> dict[str, Any]:
         from dataclasses import asdict
@@ -163,10 +172,17 @@ class GroupingReadout:
 
 
 def runs_from_spans(spans: list[Span]) -> list[TraceRun]:
+    """Group spans into runs, PRESERVING first-seen (file) order.
+
+    Review r4-F1: this used to sort by trace_id — lexicographic order over
+    random ids, i.e. a temporal SCRAMBLE. An untimestamped stream fed to
+    `watch` had its drift smeared across every window and the breach never
+    fired. Dict insertion order is the file order; `watch` sorts runs that
+    carry parseable timestamps ahead of that."""
     by_trace: dict[str, list[Span]] = {}
     for span in spans:
         by_trace.setdefault(str(span["trace_id"]), []).append(span)
-    return [TraceRun(trace_id=tid, spans=s) for tid, s in sorted(by_trace.items())]
+    return [TraceRun(trace_id=tid, spans=s) for tid, s in by_trace.items()]
 
 
 def grouping_readout(
@@ -216,15 +232,25 @@ def grouping_readout(
             )
         )
 
+    singleton_rate = (sizes.count(1) / len(sizes)) if sizes else 0.0
+    runs_in_singletons = sum(1 for size in sizes if size == 1)
+    shred_warning = None
+    if sizes and runs_in_singletons / max(n_grouped, 1) > 0.5:
+        shred_warning = (
+            f"{runs_in_singletons}/{n_grouped} runs sit in singleton clusters — the grouping "
+            "is likely SHREDDING one task into many (mask gaps?); purity numbers are "
+            "meaningless in this regime (a fully shredded grouping scores 100% purity)"
+        )
     return GroupingReadout(
         strategy=strategy.name,
         n_runs=len(runs),
         n_grouped=n_grouped,
         n_unsigned=unsigned,
         n_clusters=len(assignments),
-        singleton_rate=(sizes.count(1) / len(sizes)) if sizes else 0.0,
+        singleton_rate=singleton_rate,
         largest_cluster_share=(max(sizes) / n_grouped) if n_grouped else 0.0,
         purity_vs_declared=(purity_weighted / declared_seen) if declared_seen else None,
         declared_coverage=(declared_seen / n_grouped) if n_grouped else None,
         clusters=clusters[:max_clusters_listed],
+        shred_warning=shred_warning,
     )

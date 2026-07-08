@@ -81,11 +81,25 @@ def load_aggregate_tasks(path: str | Path) -> tuple[dict[str, tuple[int, int]], 
         raise ValueError(f"{path}: not a KeenTouchstone aggregate.json (missing suite/tasks)")
     tasks: dict[str, tuple[int, int]] = {}
     for row in payload["tasks"]:
+        # r5-F3: rows flow into division and published numbers — validate here
+        # once for attribute, compare AND slo-gate (raw KeyError/ZeroDivision
+        # tracebacks and "failure rate -50%" both reproduced pre-fix).
+        for key in ("task_key", "n_rollouts", "pass_rate"):
+            if key not in row:
+                raise ValueError(f"{path}: task row missing {key!r} — file edited or foreign")
         n = int(row["n_rollouts"])
-        c = round(row["pass_rate"] * n)
-        if abs(c - row["pass_rate"] * n) > 1e-6:
+        if n < 1:
+            raise ValueError(f"{path}: task {row['task_key']!r} has n_rollouts={n} (< 1)")
+        rate = float(row["pass_rate"])
+        if not 0.0 <= rate <= 1.0:
             raise ValueError(
-                f"{path}: task {row['task_key']!r} pass_rate {row['pass_rate']} × n {n} is not "
+                f"{path}: task {row['task_key']!r} pass_rate {rate} outside [0, 1] — "
+                "file edited or corrupt"
+            )
+        c = round(rate * n)
+        if abs(c - rate * n) > 1e-6:
+            raise ValueError(
+                f"{path}: task {row['task_key']!r} pass_rate {rate} × n {n} is not "
                 "a whole count — file edited or not produced by this tool"
             )
         tasks[str(row["task_key"])] = (n, c)
@@ -195,6 +209,14 @@ def slo_gate(aggregate_path: str | Path, slo: str, strict: bool = False) -> Gate
             "regenerate with enough trials per task to evaluate this SLO"
         )
     value, ci_high = point["pass_hat_k"], point.get("ci_high")
+    if ci_high is None and not strict:
+        # r4-F6: "fails only on a confident breach" is VACUOUS with no CI —
+        # a point of 0.01 would pass an SLO of 0.99. Refuse to gate instead.
+        raise ValueError(
+            f"the aggregate carries no CI at k={slo_k} — the default gate decides on "
+            "confidence and cannot assess any; regenerate the aggregate with this tool, "
+            "or use --strict to gate on the point estimate"
+        )
     where = f"pass^{slo_k} = {value:.3f}" + (
         f" (95% CI [{point.get('ci_low'):.3f}, {ci_high:.3f}])" if ci_high is not None else ""
     )

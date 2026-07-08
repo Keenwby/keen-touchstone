@@ -1,5 +1,23 @@
 # Changelog
 
+## [Unreleased] — fix round r4+r5 (2026-07-08): both pipeline review reports (Phase 4 + Phase 5) landed; all 14 findings fixed with regressions
+
+Reviewer meta-verdict, both rounds: *the statistics survive adversarial probing; the operational boundary does not.* Every P1 lived at input validation / ordering / exit codes / alert state — none in the math. Fixes (tagged `[r4-Fn]`/`[r5-Fn]` in `tests/test_review_r4_r5_regressions.py`, 13 new tests):
+
+- **[r4-F1, P1]** `runs_from_spans` sorted runs lexicographically by trace id, scrambling untimestamped streams so a clean drift signal smeared into warnings — now preserves file order; `watch` orders timestamped runs chronologically first, keeps untimestamped ones in file order, and counts both in warnings.
+- **[r4-F2, P1]** an `insufficient_n` window silently cleared a standing breach — now only an `ok` window clears it; `WatchReport.standing_breach` + a "STILL STANDING" warning; exit code keyed to the standing state.
+- **[r4-F3, P1]** domain errors and fired gates shared exit 1 — new 0/1/2/3 contract (see README), `_CleanErrors` exits 3; existing gate tests re-audited one by one (gate verdicts stay 1).
+- **[r4-F4, P2]** timestamps were compared as strings — `parse_stamp()` handles ISO (any UTC offset) + numeric epochs (s/ms/ns heuristic); mixed-offset streams order correctly; unparseable stamps are counted, not guessed.
+- **[r4-F5, P2]** bare git-SHA-shaped hex ids escaped the template masks (under-merging) — new hex-run mask; and when singletons dominate, `GroupingReadout.shred_warning` says the purity number is meaningless instead of parading 100%.
+- **[r4-F6, P2]** `slo-gate` on a foreign aggregate without a CI at the SLO's k passed vacuously — default mode now refuses with "cannot assess"; `--strict` gates on the point estimate.
+- **[r4-F7]** flaky cassette test (id-reuse address collision) pinned via keepalive refs. **[r4-Q1]** `--follow` help states it never exits on breach. **[r4-Q2]** span schema documents `start_time`/`harness.outcome`/score fields.
+- **[r5-F1, P1]** `attribute` accepted the same file for two cells and transposed swap files silently — same-path/identical-identity now a hard error (exit 3); model tags contradicting the 2×2 design produce warnings in output + `attribution.json`; cell identity (path, model, config hash) recorded per cell.
+- **[r5-F2, P1]** out-of-range shares were clamped to 0.0 ("measured: no effect") — now `null` with the raw delta preserved in `detail` (see README policy).
+- **[r5-F3, P2]** `load_aggregate_tasks` swallowed malformed rows — missing keys / n<1 / pass_rate outside [0,1] are clean ValueErrors.
+- **[r5-F5, P2]** the diagnose error-marker rule was dead code (generic tool arms matched first) — hoisted; tool outputs that scream failure now rank.
+- **[r5-F4/F6/F7, P2]** diagnose's success message no longer implies the run was verified good; `decompose` prints `[too few tasks for a CI]` instead of a width-zero bracket; unequal per-cell trial counts are noted.
+- Suite: 243 passed, ruff clean; both keyless demos re-verified. Two `fix-verification` requests queued (both reports demand variant sweeps: "every fix here is regex/ordering/exit-code shaped, i.e. maximal patch-overfitting risk").
+
 ## [Unreleased] — 0.5.0 (Phase 5: model-vs-harness attribution, built 2026-07-08) — **the roadmap is complete**
 
 **The last moat:** failure attribution as measurement, not inference.
