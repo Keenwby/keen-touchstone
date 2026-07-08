@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased] — 0.5.0 (Phase 5: model-vs-harness attribution, built 2026-07-08) — **the roadmap is complete**
+
+**The last moat:** failure attribution as measurement, not inference.
+
+- **decompose** (`attribution/decompose.py`): paired per-task failure-rate shares across counterfactual cells (baseline / model-swap / harness-swap / optional both-swap); task-bootstrap CIs + sign-flip significance (Phase 4 machinery reused); 2×2 factorial identity asserted at runtime — which immediately caught the builder's own interaction sign error during development; 3-cell mode honestly "interaction not estimable"; negative shares and negative/positive interactions are glossed findings.
+- **attribute CLI**: eats aggregate.json cells; emits the money sentence + `attribution.json` — the Phase 0 schema's `attribution` block filled for the first time (`method: measured_ab`, schema-validated). Analysis, not a gate: exit 0.
+- **diagnose** (`attribution/diagnose.py` + CLI): deterministic ETCLOVG rule table over failed cassettes → ranked layer hypotheses with the ~14%/~53% academic ceiling AS THE OUTPUT HEADER (`method: inferred_layer_hypothesis`); successful tapes refuse politely; every output points at the measured instrument.
+- **attribute-demo** (keyless): one agent, two independently switchable fault sources (weak planner mis-plans designed invoices → failed lookups; buggy parser dies on comma amounts; one invoice needs BOTH fixes), 24 tasks × 4 cells through the Phase 3 io seam. Designed truth recovered exactly: baseline 54.2%, model +25.0pp [+8.3, +41.7] significant, harness +25.0pp significant, interaction +4.2pp, irreducible 0%.
+- Deferred and recorded: HAL-style corrupt-success/leakage detectors (originally sketched for this phase) split off as an independent candidate sub-project; automated harness ablation (generating harness₂ mechanically); LLM-inference attribution (the ~14% ceiling makes it an anti-goal).
+- Review round 5 submitted through the `/adversarial-review` pipeline (round 4 request still pending in the same queue).
+
 ## [Unreleased] — 0.4.0 (Phase 4: the online loop, built 2026-07-08)
 
 **The unified loop, delivered:** one `pass^k` definition, offline and online. And a first honest cut at the keystone open problem — task identity for organic traffic.

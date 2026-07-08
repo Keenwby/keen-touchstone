@@ -69,8 +69,10 @@ The output is a `ReliabilityAggregate` (see [`SPEC.md`](./docs/spec/SPEC.md) §4
 | 1 | trace-bootstrap → `pass^k` ± CI + decay curve | ✅ |
 | 2 | judge calibration as a CI-blocking gate (κ + alt-test → `JUDGE_LICENSED`/`NEEDS_HUMAN`) | ✅ |
 | 3 | cassette + deterministic replay (harness-logic re-execution) | ✅ |
-| **4** | **online layer + the unified offline↔online loop** | ✅ |
-| 5 | model-vs-harness attribution (counterfactual adjudication) | — |
+| 4 | online layer + the unified offline↔online loop | ✅ |
+| **5** | **model-vs-harness attribution (counterfactual adjudication)** | ✅ |
+
+**The roadmap is complete: all five phases of the Phase 0 spec are built.**
 
 ## The judge gate (Phase 2)
 
@@ -125,6 +127,21 @@ uv run touchstone slo-gate out/aggregate.json --slo 0.6@4     # release gate for
 - **watch** uses tumbling (never sliding) windows and two alert levels: BREACH only when the whole CI sits below the SLO; a straddling CI is a warning. The repeated-look inflation is noted in the output, not hidden.
 - **compare** is a paired sign-flip permutation test on shared tasks (exact to 2^12, scipy-cross-checked) with a bootstrap CI on the mean delta — and an UNDERPOWERED flag that says "absence of evidence" out loud when the shared-task count is small.
 - Still **ingest-don't-collect**: no daemon, no collector, no dashboards — read the files you already have.
+
+## Attribution (Phase 5)
+
+*"Your agent failed 8% of the time — 5 points were the model, 3 points were your retry logic."* No shipping tool can produce that sentence; KeenTouchstone **measures** it:
+
+```bash
+uv run touchstone attribute-demo    # keyless: one agent, two switchable fault sources,
+                                    # four cells → the sentence, with CIs and significance
+uv run touchstone attribute --baseline b.json --model-swap m.json \
+    --harness-swap h.json [--both-swap x.json]
+uv run touchstone diagnose out/replay-demo/cassettes/<failed>.cassette.jsonl
+```
+
+- **The trustworthy instrument is a measured A/B**: run the same task suite under baseline / model-swap / harness-swap (optionally both-swap); shares are paired per-task failure deltas with bootstrap CIs and sign-flip significance. With the fourth cell the 2×2 identity holds exactly (asserted at runtime) and the **interaction term** is estimated: positive = some failures need both fixes; negative = the shares double-count. Negative shares ("the better model made it worse") are findings, reported as such. The literature's "harness fixes buy 15–50%" number is single-team and unreplicated — this tool never cites it; it measures *your* data.
+- **The low-trust hint is caged**: `diagnose` ranks ETCLOVG harness-layer hypotheses from a failed cassette with the academic ceiling (**step-level attribution SOTA ≈ 14%**, agent-level ≈ 53%) printed as the output header — a reading list for a human, never a verdict.
 
 ## Development
 
