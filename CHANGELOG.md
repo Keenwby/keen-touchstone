@@ -1,5 +1,15 @@
 # Changelog
 
+## [Unreleased] — cross-family review round (Codex, 2026-07-11): 2 High + 2 Medium, all fixed with regressions
+
+After seven Claude-family rounds, a cross-model-family lens (OpenAI Codex, full repo, reproducer-verified) — run because both fix-verification reports flagged single-model review as the residual blind spot. Codex independently confirmed the statistics core clean (pass^k UMVUE, cluster bootstrap + envelope, sign-flip, kappa/alt-test, replay refusals, license re-derivation) and found four operational-boundary defects Claude never surfaced (`[xfam Xn]`, 4 new tests, suite 255):
+
+- **[X1, High]** `watch` swallowed per-window ingestion errors as `no_data` and exited 0 — a mixed-model/mixed-config stream printed the right complaint in a table cell and returned a green SLO result. Streams are now identity-checked up front (multiple models/configs = domain error, exit 3), and a stream where NO window could be assessed is likewise an error, never silence.
+- **[X2, High]** a model-graded verdict that OMITS `judge_model` passed under a license issued for a named model — the identity-binding check only fired on a stated-and-different model. Omission is now refused: under a license that records `judge_model`, every model-graded verdict must state one.
+- **[X3, Medium]** `--headline-k 0` raw-KeyError'd at exit 1 ("gate fired") — now a click usage error (exit 2, IntRange), with a library-level ValueError for programmatic callers.
+- **[X4, Medium]** duplicate `item_id`s in judge-label files silently last-won into the calibration — now rejected like anchors and verdicts already were.
+- Method note: the cross-family lens paid for itself exactly as predicted — all four live in the operational boundary (the layer every round finds), but in FILES Claude-family rounds had repeatedly probed and passed.
+
 ## [Unreleased] — closeout fix round (2026-07-10): both fix-verification reports in; N1 (P1) + 7 P2 + quarantine items fixed
 
 The verification reports confirmed all 14 first-round fixes held under mutation testing (7/7 r4, and r5's math fixes), then found the predicted patch-overfitting shape: siblings of each fix one door over. All addressed, with the reviewers' own probes re-run and inverted (`[fixver *]` tags; 8 new tests, suite 251):

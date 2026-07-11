@@ -482,3 +482,89 @@ def test_n4_benign_test_summaries_do_not_read_as_error_markers(tmp_path) -> None
     report = diagnose_cassette(tmp_path / "cassettes" / f"{rec.run_id}.cassette.jsonl")
     reasons = [h.reason for h in report.hypotheses]
     assert not any("error markers" in r for r in reasons), reasons
+
+
+# ---------------------------------------------------------------------------
+# Cross-family review (Codex, 2026-07-11): four findings Claude-family rounds
+# systematically missed — all operational-boundary shaped, math again clean.
+# ---------------------------------------------------------------------------
+
+
+def test_x1_mixed_stream_is_a_domain_error_not_a_green_watch(tmp_path) -> None:
+    """[xfam X1] mixed-model / mixed-config streams and streams where nothing
+    can be assessed must exit 3 — not print no_data windows and exit 0."""
+    mixed = [
+        dict(_watch_run("task/a", "failure", "2026-01-01T00:00:00Z", "r1"),
+             **{"gen_ai.request.model": "model-a", "harness.agent_config_hash": "cfg-a"}),
+        dict(_watch_run("task/a", "failure", "2026-01-01T00:00:01Z", "r2"),
+             **{"gen_ai.request.model": "model-b", "harness.agent_config_hash": "cfg-b"}),
+    ]
+    with pytest.raises(ValueError, match="multiple models"):
+        watch_stream(mixed, window_size=2, slo="0.9@1")
+
+    path = tmp_path / "mixed.jsonl"
+    path.write_text("\n".join(json.dumps(s) for s in mixed) + "\n")
+    result = CliRunner().invoke(main, ["watch", str(path), "--window", "2", "--slo", "0.9@1"])
+    assert result.exit_code == 3, result.output
+
+    # sibling: nothing in the stream resolvable → also a data error, not green
+    unresolvable = [
+        {k: v for k, v in _watch_run("task/a", None, f"2026-01-01T00:00:0{i}Z", f"u{i}").items()
+         if k != "harness.outcome"}
+        for i in range(4)
+    ]
+    with pytest.raises(ValueError, match="could be assessed"):
+        watch_stream(unresolvable, window_size=2, slo="0.9@1")
+
+
+def test_x2_verdicts_hiding_their_judge_model_are_refused() -> None:
+    """[xfam X2] omitting judge_model must not slip past a license issued for
+    a named model — omission is not identity."""
+    from keen_touchstone.artifacts import CalibrationThresholds, EvalVerdict, JudgeCalibration
+    from keen_touchstone.judge.verdicts import outcomes_from_verdicts
+
+    license_ = JudgeCalibration(
+        calibration_id="cal-abc", judge_id="licensed-judge",
+        judge_model="licensed-model-v1", judge_prompt_hash="prompt-hash-v1",
+        anchor_n_items=30, n_human_annotators=1, prevalence=0.5,
+        kappa=1.0, raw_agreement=1.0, tpr=1.0, fpr=0.0, abstention_rate=0.0,
+        thresholds=CalibrationThresholds(), status="JUDGE_LICENSED",
+        reasons=[], created_at="2026-01-01T00:00:00+00:00",
+        keen_touchstone_version="test",
+    )
+    hidden = EvalVerdict(
+        verdict_id="v1", trace_id="t1", scorer_id="licensed-judge",
+        scorer_version="1", scorer_kind="model_graded", tier="T2_ungrounded",
+        value=True, judge_calibration_ref="cal-abc",  # judge_model omitted
+    )
+    with pytest.raises(ValueError, match="omit judge_model"):
+        outcomes_from_verdicts([hidden], license_)
+
+
+def test_x3_headline_k_zero_is_a_usage_error_not_a_fired_gate(tmp_path) -> None:
+    """[xfam X3] --headline-k 0 raw-KeyError'd at exit 1 ('gate fired')."""
+    result = CliRunner().invoke(main, [
+        "ingest", "--demo", "--out", str(tmp_path / "o"), "--headline-k", "0",
+    ])
+    assert result.exit_code == 2, result.output  # click usage error
+    assert "KeyError" not in result.output
+
+    from keen_touchstone.aggregate import build_suite_result
+    from keen_touchstone.stats import TaskTrials
+
+    with pytest.raises(ValueError, match="headline_k"):  # library callers too
+        build_suite_result([TaskTrials("t", 4, 2)], context="offline",
+                           model="m", agent_config_hash="h", headline_k=0)
+
+
+def test_x4_duplicate_judge_labels_rejected(tmp_path) -> None:
+    """[xfam X4] duplicate item_ids silently last-won into the calibration."""
+    from keen_touchstone.judge.anchors import read_judge_labels
+
+    path = tmp_path / "labels.jsonl"
+    path.write_text(
+        '{"item_id": "anchor-1", "judge_label": false}\n'
+        '{"item_id": "anchor-1", "judge_label": true}\n'
+    )
+    with pytest.raises(ValueError, match="duplicate judge_label"):
+        read_judge_labels(path)

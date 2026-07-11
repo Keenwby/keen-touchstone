@@ -80,6 +80,10 @@ def build_suite_result(
     curve_k_max = min(k_max, common) if k_max is not None else common
     if headline_k is None:
         headline_k = default_headline_k(curve_k_max)
+    elif headline_k < 1:
+        # [xfam X3] headline_k=0 reached the curve dict as a raw KeyError and
+        # exited 1 — the CLI guards with IntRange, this guards library callers
+        raise ValueError(f"headline_k must be >= 1 (got {headline_k})")
     elif headline_k > curve_k_max:
         warnings.append(
             f"requested headline k={headline_k} exceeds the curve range (k_max={curve_k_max}); "

@@ -114,6 +114,15 @@ def outcomes_from_verdicts(
                 f"judge_id={license_.judge_id!r} — a license only covers the judge that took "
                 "the exam"
             )
+        # [xfam X2] omission is not identity: a verdict that hides its
+        # judge_model must not pass under a license issued for a named model
+        unstated = sorted(v.verdict_id for v in model_graded if not v.judge_model)
+        if license_.judge_model and unstated:
+            raise ValueError(
+                f"{len(unstated)} model-graded verdict(s) (e.g. {unstated[:3]}) omit "
+                f"judge_model, but the license was issued for "
+                f"judge_model={license_.judge_model!r} — identity must be stated, not implied"
+            )
         wrong_model = sorted({
             str(v.judge_model)
             for v in model_graded

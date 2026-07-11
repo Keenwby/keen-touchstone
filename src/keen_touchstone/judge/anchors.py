@@ -151,6 +151,13 @@ def read_judge_labels(path: str | Path) -> dict[str, bool | None]:
             item_id = raw.get("item_id")
             if not item_id:
                 raise ValueError(f"{path}:{lineno}: missing item_id")
+            if str(item_id) in labels:
+                # [xfam X4] last-row-wins silently rewrote earlier labels —
+                # anchors and verdicts already reject duplicates; so does this
+                raise ValueError(
+                    f"{path}:{lineno}: duplicate judge_label for item_id {item_id!r} — "
+                    "one label per anchor item"
+                )
             value = raw.get("judge_label")
             if isinstance(value, bool) or value is None:
                 labels[str(item_id)] = value

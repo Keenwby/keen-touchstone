@@ -26,7 +26,7 @@ def main() -> None:
 
 _shared = [
     click.option("--k-max", type=int, default=None, help="Cap the decay curve at this k (default: min trials per task)."),
-    click.option("--headline-k", type=int, default=None, help="k for the headline pass^k (default: half the curve depth — near k=n the per-task estimator degenerates)."),
+    click.option("--headline-k", type=click.IntRange(min=1), default=None, help="k for the headline pass^k (default: half the curve depth — near k=n the per-task estimator degenerates)."),
     click.option("--resamples", type=int, default=2000, show_default=True, help="Bootstrap resamples for the suite CI."),
     click.option("--seed", type=int, default=2026, show_default=True, help="Seed for the bootstrap (reproducible CIs)."),
 ]

@@ -208,6 +208,22 @@ def watch_stream(
     if not runs:
         raise ValueError("no runs in the stream")
 
+    # [xfam X1] a mixed-model/mixed-config stream is invalid INPUT, not a
+    # sequence of empty windows — per-window ingestion errors used to become
+    # "no data" and the whole run exited 0 with a green face
+    models = {m for r in runs if (m := r.attr("gen_ai.request.model"))}
+    configs = {c for r in runs if (c := r.attr("harness.agent_config_hash"))}
+    if len(models) > 1:
+        raise ValueError(
+            f"the stream spans multiple models {sorted(models)} — watch one (model, config) "
+            "at a time so pass^k groups honestly (filter the JSONL first)"
+        )
+    if len(configs) > 1:
+        raise ValueError(
+            f"the stream spans multiple harness.agent_config_hash values {sorted(configs)} — "
+            "watch one configuration at a time"
+        )
+
     windows: list[WindowResult] = []
     warnings: list[str] = []
     for i in range(0, len(runs), window_size):
@@ -221,6 +237,15 @@ def watch_stream(
         )
     full = [w for w in windows if w.status != "pending"]
     latest = full[-1].status if full else "pending"
+
+    # [xfam X1 sibling] if NOTHING was ever assessed, exiting 0 would claim a
+    # watched-and-fine stream — a stream this tool cannot read is a data error
+    if full and all(w.status == "no_data" for w in full):
+        details = sorted({w.detail for w in full if w.detail})
+        raise ValueError(
+            "no window in the stream could be assessed — every window failed ingestion "
+            f"({details[0] if details else 'no detail'})"
+        )
 
     standing = False
     breach_window: int | None = None
