@@ -16,6 +16,7 @@ is the measured A/B next door (`touchstone attribute`).
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -98,7 +99,11 @@ def _rules(err_type: str, message: str, last: TraceEvent | None) -> list[Hypothe
     # this rule was dead code (its most useful signal could never surface)
     if last is not None and last.kind == "tool_call":
         tool_output = json.dumps(last.output, default=str).lower()
-        if '"error"' in tool_output or "failed" in tool_output:
+        # [fixver N4] bare "failed" false-positived on benign test-runner
+        # summaries ("0 failed, 12 passed") — a count immediately before the
+        # word reads as a tally, not a marker; keep the quoted-"error" check
+        failed_marker = re.search(r"(?<![0-9])(?<![0-9]\s)failed", tool_output)
+        if '"error"' in tool_output or failed_marker:
             add("Tooling", "the last tool output itself carries error markers")
 
     if any(marker in message for marker in _TIMEOUT_MARKERS) or "Timeout" in err_type:

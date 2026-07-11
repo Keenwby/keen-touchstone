@@ -135,8 +135,16 @@ def _evaluate_window(
     seed: int,
 ) -> WindowResult:
     spans = [span for run in runs for span in run.spans]
-    stamps = sorted(str(r.attr("start_time")) for r in runs if r.attr("start_time"))
-    start, end = (stamps[0], stamps[-1]) if stamps else (None, None)
+    # [fixver R2-3] labels are picked on the PARSED timeline (the r4-F4 fix
+    # windowed on it but still string-sorted these display stamps — mixed
+    # offsets labelled a window with the chronologically-wrong start)
+    stamped = sorted(
+        ((parsed, str(raw)) for r in runs
+         if (raw := r.attr("start_time")) is not None
+         and (parsed := parse_stamp(raw)) is not None),
+        key=lambda pair: pair[0],
+    )
+    start, end = (stamped[0][1], stamped[-1][1]) if stamped else (None, None)
     base = dict(index=index, start_time=start, end_time=end, n_runs=len(runs))
 
     try:

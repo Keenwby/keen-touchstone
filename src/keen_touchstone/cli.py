@@ -198,6 +198,11 @@ def ingest(traces: Path | None, use_demo: bool, outcome_regex: str | None, thres
         )
         if readout is not None:
             result.warnings.append(readout.caveat)
+            # [fixver R2-4] the shred warning lived only in aggregate.json —
+            # the terminal still showed unqualified "purity 100%" on a fully
+            # shredding stream, the exact audience the warning exists for
+            if readout.shred_warning:
+                result.warnings.append(readout.shred_warning)
             _print_grouping_readout(readout)
     emit(
         result,
@@ -235,6 +240,9 @@ def _print_grouping_readout(readout) -> None:
         )
     console.print(table)
     console.print(f"  [yellow]caveat:[/yellow] {readout.caveat}")
+    if readout.shred_warning:
+        console.print("  [yellow]warning:[/yellow] ", end="")
+        console.print(readout.shred_warning, markup=False)
 
 
 def _build_ingest_result(ingested, k_max, headline_k, resamples, seed, task_key_source="declared_tag"):
@@ -402,13 +410,27 @@ def attribute(baseline: str, model_swap: str, harness_swap: str, both_swap: str 
             suite = payload.get("suite", {})
             identity[name] = (suite.get("model"), suite.get("agent_config_hash"))
         # r5-F1b: the experiment's premise is checkable from metadata the files
-        # already carry — check it instead of discarding it
+        # already carry — check it instead of discarding it. [fixver N1] ANY
+        # two cells sharing an identity is contamination — the original fix
+        # guarded only the baseline/model_swap pair, and a baseline copy passed
+        # as --harness-swap published "harness_share: 0.0, method: measured_ab".
         identity_warnings: list[str] = []
-        if identity["baseline"] == identity["model_swap"]:
-            raise ValueError(
-                f"the model_swap cell has the SAME model+config identity as baseline "
-                f"{identity['baseline']} — it cannot be a model swap"
-            )
+        names = list(paths)
+        for i, a in enumerate(names):
+            for b in names[i + 1:]:
+                if identity[a] != identity[b]:
+                    continue
+                if identity[a] == (None, None):
+                    raise ValueError(
+                        f"--{a.replace('_', '-')} and --{b.replace('_', '-')} carry no "
+                        "model/agent_config_hash identity metadata — the 2x2 premise "
+                        "cannot be verified; regenerate the cells with this tool"
+                    )
+                raise ValueError(
+                    f"--{a.replace('_', '-')} and --{b.replace('_', '-')} have the SAME "
+                    f"model+config identity {identity[a]} — the same configuration run "
+                    "twice is not a swap experiment"
+                )
         if identity["baseline"][0] != identity["harness_swap"][0]:
             identity_warnings.append(
                 f"harness_swap should keep the baseline MODEL, but models differ: "
@@ -429,7 +451,10 @@ def attribute(baseline: str, model_swap: str, harness_swap: str, both_swap: str 
 
     console.print()
     console.rule("[bold]attribute — model vs harness, measured[/bold]")
-    console.print(f"  {result.sentence()}")
+    # [fixver N3] markup=False: rich parsed "[too few tasks for a CI]" as a
+    # style tag and silently dropped it — the underpowered case printed a bare
+    # point estimate, the exact false precision the annotation exists to stop
+    console.print(f"  {result.sentence()}", markup=False)
     console.print(
         f"  [dim]{result.n_shared_tasks} shared tasks · paired sign-flip significance at "
         f"α={alpha} · CIs bootstrap over tasks[/dim]"
@@ -452,7 +477,11 @@ def attribute(baseline: str, model_swap: str, harness_swap: str, both_swap: str 
         model_share=share_or_null(result.model_share.delta),
         harness_share=share_or_null(result.harness_share.delta),
         method="measured_ab",
+        # [fixver N3] a width-zero band over too few tasks is false precision
+        # on the machine-readable surface too — say so instead of printing it
         confidence_band=(
+            f"too few shared tasks ({result.n_shared_tasks}) for a CI — direction-only evidence"
+            if result.underpowered else
             f"model {result.model_share.ci_low * 100:+.1f}..{result.model_share.ci_high * 100:+.1f}pp, "
             f"harness {result.harness_share.ci_low * 100:+.1f}..{result.harness_share.ci_high * 100:+.1f}pp (95%)"
         ),

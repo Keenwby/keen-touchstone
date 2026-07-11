@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased] — closeout fix round (2026-07-10): both fix-verification reports in; N1 (P1) + 7 P2 + quarantine items fixed
+
+The verification reports confirmed all 14 first-round fixes held under mutation testing (7/7 r4, and r5's math fixes), then found the predicted patch-overfitting shape: siblings of each fix one door over. All addressed, with the reviewers' own probes re-run and inverted (`[fixver *]` tags; 8 new tests, suite 251):
+
+- **[N1, P1]** cell-identity contamination was refused only for the baseline/model_swap pair — a COPY of the baseline passed as `--harness-swap` still published `harness_share: 0.0, method: measured_ab`. Now ANY two cells with identical (model, agent_config_hash) hard-error (exit 3), through every door including `--both-swap`; the guard is pinned by tests (copied-file variants the same-file rule can't catch). Identity-less cells fail closed with honest wording ("cannot be verified", not "same identity") — the V6 quarantine item.
+- **[N2, P2]** `null` / string / non-integral / bool row values in aggregate files now raise clean ValueErrors before any conversion (were: raw TypeError at exit 1, or silent coercion of "4"/4.7/true).
+- **[R2-1, P2]** decay-curve entries get the same validation as task rows: missing `k` or non-numeric `pass_hat_k`/`ci_high` → clean domain error (exit 3), never a traceback wearing "gate fired".
+- **[R2-2, P2]** the F2 regression test was theater — its fixture never produced the abstention window it claimed (green pre-fix, green under a state-machine revert). Fixture rebuilt from the reviewer's construction; statuses pinned to `["breach", "insufficient_n"]` so it can't drift again.
+- **[R2-3, P2]** window display labels (`start_time`/`end_time` in the table and `--out` JSON) were still string-sorted — now picked on the parsed timeline, same `parse_stamp` as the windowing.
+- **[R2-4, P2]** `shred_warning` reached only `aggregate.json` — the terminal showed unqualified "purity 100%" on a fully-shredding stream. Now printed next to the caveat and appended to the aggregate's top-level warnings.
+- **[N3, P2]** rich parsed `[too few tasks for a CI]` as a style tag and dropped it — the underpowered CLI printed a bare point estimate (the exact false precision the annotation exists to stop). Sentence now printed markup-off; `attribution.json`'s `confidence_band` says "too few shared tasks (N) for a CI — direction-only evidence" instead of a width-zero band.
+- **[N4, P2]** the hoisted error-marker rule false-positived on benign test-runner summaries ("0 failed, 12 passed") — a digit-tally before "failed" no longer reads as a marker; real failure phrases ("3 uploads failed") still fire.
+- Verdicts on the first-round fixes stand: r4 7/7 CONFIRMED-FIXED (Can Ship, single-model caveat); r5 4/7 clean + 3 partial — the partials are exactly this round. Suite: 251 passed, ruff clean; `attribute-demo` truth recovery unchanged; reviewers' probe scripts re-run and inverted.
+
 ## [Unreleased] — fix round r4+r5 (2026-07-08): both pipeline review reports (Phase 4 + Phase 5) landed; all 14 findings fixed with regressions
 
 Reviewer meta-verdict, both rounds: *the statistics survive adversarial probing; the operational boundary does not.* Every P1 lived at input validation / ordering / exit codes / alert state — none in the math. Fixes (tagged `[r4-Fn]`/`[r5-Fn]` in `tests/test_review_r4_r5_regressions.py`, 13 new tests):

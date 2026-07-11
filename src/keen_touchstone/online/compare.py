@@ -87,10 +87,24 @@ def load_aggregate_tasks(path: str | Path) -> tuple[dict[str, tuple[int, int]], 
         for key in ("task_key", "n_rollouts", "pass_rate"):
             if key not in row:
                 raise ValueError(f"{path}: task row missing {key!r} — file edited or foreign")
-        n = int(row["n_rollouts"])
+        # [fixver N2] presence is not validity: null crashed with a raw
+        # TypeError at exit 1 ("gate fired"); "4"/4.7/true were silently
+        # coerced. Types are checked before any conversion touches them.
+        n_raw, rate_raw = row["n_rollouts"], row["pass_rate"]
+        if isinstance(n_raw, bool) or not isinstance(n_raw, int):
+            raise ValueError(
+                f"{path}: task {row['task_key']!r} n_rollouts must be an integer, "
+                f"got {n_raw!r} — file edited or foreign"
+            )
+        if isinstance(rate_raw, bool) or not isinstance(rate_raw, (int, float)):
+            raise ValueError(
+                f"{path}: task {row['task_key']!r} pass_rate must be a number, "
+                f"got {rate_raw!r} — file edited or foreign"
+            )
+        n = n_raw
         if n < 1:
             raise ValueError(f"{path}: task {row['task_key']!r} has n_rollouts={n} (< 1)")
-        rate = float(row["pass_rate"])
+        rate = float(rate_raw)
         if not 0.0 <= rate <= 1.0:
             raise ValueError(
                 f"{path}: task {row['task_key']!r} pass_rate {rate} outside [0, 1] — "
@@ -202,13 +216,30 @@ def slo_gate(aggregate_path: str | Path, slo: str, strict: bool = False) -> Gate
     slo_value, slo_k = parse_slo(slo)
     _, payload = load_aggregate_tasks(aggregate_path)
     curve = payload["suite"].get("reliability_decay_curve") or []
+    # [fixver R2-1] curve entries got none of the r5-F3 row validation — a
+    # missing "k" or null pass_hat_k tracebacked to exit 1 ("gate fired")
+    for entry in curve:
+        if not isinstance(entry, dict) or "k" not in entry:
+            raise ValueError(
+                f"{aggregate_path}: decay-curve entry missing 'k' — file edited or foreign"
+            )
     point = next((p for p in curve if p["k"] == slo_k), None)
     if point is None:
         raise ValueError(
             f"the aggregate's decay curve has no k={slo_k} (it runs to k={len(curve)}) — "
             "regenerate with enough trials per task to evaluate this SLO"
         )
-    value, ci_high = point["pass_hat_k"], point.get("ci_high")
+    value, ci_high = point.get("pass_hat_k"), point.get("ci_high")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(
+            f"{aggregate_path}: pass_hat_k at k={slo_k} must be a number, got {value!r} — "
+            "file edited or foreign"
+        )
+    if ci_high is not None and (isinstance(ci_high, bool) or not isinstance(ci_high, (int, float))):
+        raise ValueError(
+            f"{aggregate_path}: ci_high at k={slo_k} must be a number or null, got {ci_high!r} — "
+            "file edited or foreign"
+        )
     if ci_high is None and not strict:
         # r4-F6: "fails only on a confident breach" is VACUOUS with no CI —
         # a point of 0.01 would pass an SLO of 0.99. Refuse to gate instead.
