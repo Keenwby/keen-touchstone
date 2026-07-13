@@ -1,6 +1,6 @@
 [project]
 name = "keen-touchstone"
-version = "0.1.0.dev0"
+version = "0.1.0"
 description = "Agentic eval & reliability harness: pass^k with confidence intervals and reliability decay curves, over Inspect AI logs and OTel GenAI traces — no golden dataset required."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -22,6 +22,10 @@ dependencies = [
     "jsonschema>=4.21",
     "rich>=13.3.3",
 ]
+
+[project.urls]
+Repository = "https://github.com/Keenwby/keen-touchstone"
+Changelog = "https://github.com/Keenwby/keen-touchstone/blob/main/CHANGELOG.md"
 
 [project.scripts]
 touchstone = "keen_touchstone.cli:main"

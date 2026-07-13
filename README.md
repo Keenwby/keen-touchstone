@@ -8,7 +8,7 @@
 
 ## Status
 
-**v0.1 (Phase 1 MLP) — built, local pre-release.** The Phase 0 spec (data model + schemas) lives in [`docs/spec/`](./docs/spec/) and [`src/keen_touchstone/schemas/`](./src/keen_touchstone/schemas/). License: MIT. Not yet published to PyPI/GitHub.
+**v0.1.0 — the full roadmap (phases 0–5) is built and verified.** Eight independent adversarial review rounds (seven Claude-family + one cross-model-family via OpenAI Codex), every finding fixed with a pinned regression test, plus a real-data pipeline check ([GSM8K case study](#a-real-data-case-study-gsm8k-on-a-local-7b-model)). 255 tests. The Phase 0 spec (data model + schemas) lives in [`docs/spec/`](./docs/spec/) and [`src/keen_touchstone/schemas/`](./src/keen_touchstone/schemas/). License: MIT.
 
 ## Quickstart (zero API keys)
 
@@ -61,6 +61,17 @@ The output is a `ReliabilityAggregate` (see [`SPEC.md`](./docs/spec/SPEC.md) §4
 - Suite aggregate = mean of per-task estimates; decay curve runs k = 1..min(nᵢ) by default so the task set is constant across k (no composition drift).
 - **CI on the aggregate = cluster bootstrap resampling tasks** — never pooled attempts (pooling understates variance). Per-task CI = Jeffreys Beta posterior with endpoints transformed x↦xᵏ. Small samples get loud warnings, not suppressed error bars: *a wide interval is the honest product.*
 
+## A real-data case study: GSM8K on a local 7B model
+
+Not our synthetic demos — a real model with real randomness. 20 GSM8K problems x 10 attempts each on a local `qwen2.5:7b` (Ollama, zero API cost), analyzed straight from the Inspect log:
+
+```
+pass@1 83.0%  →  pass^5 58.1% [39.7%, 74.5%]  →  pass^10 40.0% [20.0%, 60.0%]
+20 tasks × 10 trials (n=200 rollouts)
+```
+
+A model that looks "83% accurate" clears ten-in-a-row on the same problem only 40% of the time. The per-task table shows why averages mislead: eight problems are 10/10 solid, one is 0/10 (the model *never* solves it), one is 2/10 — and the variance-decomposition lever correctly says more *tasks*, not more reruns, buys certainty here. Full write-up: [`docs/case-studies/gsm8k.md`](./docs/case-studies/gsm8k.md).
+
 ## Roadmap
 
 | Phase | Deliverable | Status |
@@ -81,7 +92,7 @@ Everyone *computes* judge-vs-human agreement (Ragas, Vertex AI); **nobody blocks
 ```bash
 uv run touchstone judge demo          # keyless: exam two judges — one licensed, one blocked
 uv run touchstone judge calibrate anchors.jsonl --judge-labels answers.jsonl
-                                      # your judge takes the exam → license.json + 体检单 report
+                                      # your judge takes the exam → license.json + an examination report
 uv run touchstone judge gate out/judge/license.json     # CI: exit 1 blocks the build
 uv run touchstone ingest traces.jsonl --outcomes-from verdicts.jsonl --license license.json
                                       # unlabeled traffic + LICENSED judge → pass^k (the loop)
@@ -155,6 +166,10 @@ uv run touchstone diagnose out/replay-demo/cassettes/<failed>.cassette.jsonl
 | 3 | domain/data error (unreadable or invalid input, refused license, contaminated cells) |
 
 CI can therefore distinguish "the agent regressed" (1) from "the pipeline is broken" (3) — conflating them was review finding r4-F3.
+
+## How this was verified
+
+The statistics core survived **eight independent adversarial review rounds**: five build-phase reviews and two fix-verification rounds (Claude-family, with mutation testing and reproducer discipline — every Critical/High finding shipped with a runnable reproducer, every fix with a pinned regression test), plus one **cross-model-family review** (OpenAI Codex), which independently confirmed the estimator/bootstrap/permutation/kappa layers clean and contributed four operational-boundary fixes. The recurring meta-verdict, both families: *the statistics survive adversarial probing; the bugs live at the operational boundary* — which is why the exit-code contract, input validation, and alert state machines above are as reviewed as the math. Full history: [`CHANGELOG.md`](./CHANGELOG.md).
 
 ## Development
 

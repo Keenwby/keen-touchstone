@@ -1,6 +1,10 @@
 # Changelog
 
-## [Unreleased] — cross-family review round (Codex, 2026-07-11): 2 High + 2 Medium, all fixed with regressions
+## 0.1.0 (2026-07-13) — first release
+
+The complete Phase 0 roadmap: pass^k ± CI + decay curves (offline + online), the judge-calibration gate, cassette/deterministic replay, the online SLO loop with derived task identity, and measured model-vs-harness attribution. Verified by eight independent adversarial review rounds (seven Claude-family + one cross-family via OpenAI Codex) and a real-data GSM8K pipeline check. The dated sections below are this release's build-and-review history, newest first.
+
+## cross-family review round (Codex, 2026-07-11): 2 High + 2 Medium, all fixed with regressions
 
 After seven Claude-family rounds, a cross-model-family lens (OpenAI Codex, full repo, reproducer-verified) — run because both fix-verification reports flagged single-model review as the residual blind spot. Codex independently confirmed the statistics core clean (pass^k UMVUE, cluster bootstrap + envelope, sign-flip, kappa/alt-test, replay refusals, license re-derivation) and found four operational-boundary defects Claude never surfaced (`[xfam Xn]`, 4 new tests, suite 255):
 
@@ -10,7 +14,7 @@ After seven Claude-family rounds, a cross-model-family lens (OpenAI Codex, full 
 - **[X4, Medium]** duplicate `item_id`s in judge-label files silently last-won into the calibration — now rejected like anchors and verdicts already were.
 - Method note: the cross-family lens paid for itself exactly as predicted — all four live in the operational boundary (the layer every round finds), but in FILES Claude-family rounds had repeatedly probed and passed.
 
-## [Unreleased] — closeout fix round (2026-07-10): both fix-verification reports in; N1 (P1) + 7 P2 + quarantine items fixed
+## closeout fix round (2026-07-10): both fix-verification reports in; N1 (P1) + 7 P2 + quarantine items fixed
 
 The verification reports confirmed all 14 first-round fixes held under mutation testing (7/7 r4, and r5's math fixes), then found the predicted patch-overfitting shape: siblings of each fix one door over. All addressed, with the reviewers' own probes re-run and inverted (`[fixver *]` tags; 8 new tests, suite 251):
 
@@ -24,7 +28,7 @@ The verification reports confirmed all 14 first-round fixes held under mutation 
 - **[N4, P2]** the hoisted error-marker rule false-positived on benign test-runner summaries ("0 failed, 12 passed") — a digit-tally before "failed" no longer reads as a marker; real failure phrases ("3 uploads failed") still fire.
 - Verdicts on the first-round fixes stand: r4 7/7 CONFIRMED-FIXED (Can Ship, single-model caveat); r5 4/7 clean + 3 partial — the partials are exactly this round. Suite: 251 passed, ruff clean; `attribute-demo` truth recovery unchanged; reviewers' probe scripts re-run and inverted.
 
-## [Unreleased] — fix round r4+r5 (2026-07-08): both pipeline review reports (Phase 4 + Phase 5) landed; all 14 findings fixed with regressions
+## fix round r4+r5 (2026-07-08): both pipeline review reports (Phase 4 + Phase 5) landed; all 14 findings fixed with regressions
 
 Reviewer meta-verdict, both rounds: *the statistics survive adversarial probing; the operational boundary does not.* Every P1 lived at input validation / ordering / exit codes / alert state — none in the math. Fixes (tagged `[r4-Fn]`/`[r5-Fn]` in `tests/test_review_r4_r5_regressions.py`, 13 new tests):
 
@@ -42,7 +46,7 @@ Reviewer meta-verdict, both rounds: *the statistics survive adversarial probing;
 - **[r5-F4/F6/F7, P2]** diagnose's success message no longer implies the run was verified good; `decompose` prints `[too few tasks for a CI]` instead of a width-zero bracket; unequal per-cell trial counts are noted.
 - Suite: 243 passed, ruff clean; both keyless demos re-verified. Two `fix-verification` requests queued (both reports demand variant sweeps: "every fix here is regex/ordering/exit-code shaped, i.e. maximal patch-overfitting risk").
 
-## [Unreleased] — 0.5.0 (Phase 5: model-vs-harness attribution, built 2026-07-08) — **the roadmap is complete**
+## 0.5.0 (Phase 5: model-vs-harness attribution, built 2026-07-08) — **the roadmap is complete**
 
 **The last moat:** failure attribution as measurement, not inference.
 
@@ -53,7 +57,7 @@ Reviewer meta-verdict, both rounds: *the statistics survive adversarial probing;
 - Deferred and recorded: HAL-style corrupt-success/leakage detectors (originally sketched for this phase) split off as an independent candidate sub-project; automated harness ablation (generating harness₂ mechanically); LLM-inference attribution (the ~14% ceiling makes it an anti-goal).
 - Review round 5 submitted through the `/adversarial-review` pipeline (round 4 request still pending in the same queue).
 
-## [Unreleased] — 0.4.0 (Phase 4: the online loop, built 2026-07-08)
+## 0.4.0 (Phase 4: the online loop, built 2026-07-08)
 
 **The unified loop, delivered:** one `pass^k` definition, offline and online. And a first honest cut at the keystone open problem — task identity for organic traffic.
 
@@ -65,7 +69,7 @@ Reviewer meta-verdict, both rounds: *the statistics survive adversarial probing;
 - Candidate spec additions for v0.3 of the data model (recorded per the headline_k precedent): a ComparisonResult shape and a WindowSeries shape.
 - **Review round 4: submitted through the user's own `/adversarial-review` pipeline** (request in `requests/inbox/`) instead of session-spawned skeptics — findings to be fixed in a follow-up round (asynchronous).
 
-## [Unreleased] — 0.3.0 (Phase 3: cassette + deterministic replay, built 2026-07-03)
+## 0.3.0 (Phase 3: cassette + deterministic replay, built 2026-07-03)
 
 **The third moat, delivered:** no shipping tool can deterministically replay an agent run. `touchstone replay` re-executes your orchestration logic against the taped model/tool outputs — same result or same crash, zero network — or names the exact step where the harness diverged.
 
