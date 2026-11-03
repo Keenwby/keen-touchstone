@@ -2,7 +2,7 @@
 
 Each test pins one reviewer finding using the reviewer's own reproduction
 logic. Tagged [r4-Fn]/[r5-Fn] to match the reports in
-~/workspace/claude-projects/adversarial-review/reviews/.
+~/workspace/adversarial-review/reviews/.
 """
 
 import json
