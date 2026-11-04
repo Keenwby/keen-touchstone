@@ -1,6 +1,6 @@
 # keen-touchstone — agent instructions
 
-**What this is:** KeenTouchstone, an OSS agentic eval & reliability harness (`pass^k` ± CI + decay curves over Inspect AI logs and OTel GenAI traces). Phase 1 MLP. The design contract is `docs/spec/` (Phase 0 snapshot) + the thesis at `~/workspace/claude-projects/research/research/deep-research/agentic-eval-reliability-harness-thesis.md`.
+**What this is:** KeenTouchstone, an OSS agentic eval & reliability harness (`pass^k` ± CI + decay curves over Inspect AI logs and OTel GenAI traces). Phase 1 MLP. The design contract is `docs/spec/` (Phase 0 snapshot) + the thesis at `~/workspace/research-kb/agentic-eval-reliability-harness-thesis.md`.
 
 ## Hard rules
 
